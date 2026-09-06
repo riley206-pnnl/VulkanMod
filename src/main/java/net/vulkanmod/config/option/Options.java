@@ -162,6 +162,15 @@ public abstract class Options {
                                 .setTranslator(InactivityFpsLimit::caption)
                 }),
                 new OptionBlock("", new Option<?>[]{
+                        new RangeOption(Component.translatable("options.fov"),
+                                30, 110, 1,
+                                value -> switch (value) {
+                                    case 70 -> Component.translatable("options.fov.min");
+                                    case 110 -> Component.translatable("options.fov.max");
+                                    default -> Component.literal(Integer.toString(value));
+                                },
+                                value -> mcOptions.fov().set(value),
+                                () -> mcOptions.fov().get()),
                         new RangeOption(Component.translatable("options.guiScale"),
                                 0, Math.max(window.calculateScale(0, minecraft.isEnforceUnicode()), mcOptions.guiScale().get()), 1,
                                 value -> Component.translatable(value == 0 ? "options.guiScale.auto" : String.valueOf(value)),

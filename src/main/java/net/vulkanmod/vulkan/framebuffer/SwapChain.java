@@ -223,8 +223,8 @@ public class SwapChain extends Framebuffer {
             this.FBO_map.clear();
         }
 
-        vkDestroySwapchainKHR(device, this.swapChainId, null);
         this.swapChainImages.forEach(image -> vkDestroyImageView(device, image.getImageView(), null));
+        vkDestroySwapchainKHR(device, this.swapChainId, null);
 
         this.depthAttachment.free();
     }

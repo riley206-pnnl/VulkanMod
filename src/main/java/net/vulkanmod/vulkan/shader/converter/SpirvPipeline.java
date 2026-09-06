@@ -128,49 +128,30 @@ public class SpirvPipeline {
     }
 
     public void updateLocations(List<String> vertexAttributes) {
-        int attribLocation = 0;
-
-        List<String> remainingAttributes = new ArrayList<>(vertexAttributes);
-
+        // Attribute locations must match the vertex format, including unused elements.
         for (int i = 0; i < vertexAttributes.size(); i++) {
-            String variableName = vertexAttributes.get(i);
-            SpirvShader.SpvVariable inputVariable = vertexShader.getInputVariable(variableName);
-            if (inputVariable != null) {
-                inputVariable.setLocation(attribLocation);
-                remainingAttributes.remove(variableName);
-                attribLocation++;
+            SpirvShader.SpvVariable input = vertexShader.getInputVariable(vertexAttributes.get(i));
+            if (input != null) {
+                input.setLocation(i);
             }
         }
 
-        if (!remainingAttributes.isEmpty()) {
-            Initializer.LOGGER.error("Missing attributes: {}", remainingAttributes);
-        }
-
+        // Unused vertex outputs are legal. Do not compact fragment locations around them.
+        Set<String> providedOutputs = new HashSet<>();
         for (int i = 0; i < vertexShader.outputs().size(); i++) {
-            vertexShader.outputs().get(i).setLocation(i);
-        }
-
-        // Fragment shader
-        List<String> vertexOutputNames = new ArrayList<>();
-
-        for (SpirvShader.SpvVariable output : vertexShader.outputs()) {
-            vertexOutputNames.add(output.name());
-        }
-
-        List<String> remainingInputs = new ArrayList<>(vertexOutputNames);
-        int inputLocation = 0;
-
-        for (String variableName : vertexOutputNames) {
-            SpirvShader.SpvVariable inputVariable = fragShader.getInputVariable(variableName);
-            if (inputVariable != null) {
-                inputVariable.setLocation(inputLocation);
-                remainingInputs.remove(variableName);
-                inputLocation++;
+            SpirvShader.SpvVariable output = vertexShader.outputs().get(i);
+            output.setLocation(i);
+            providedOutputs.add(output.name());
+            SpirvShader.SpvVariable input = fragShader.getInputVariable(output.name());
+            if (input != null) {
+                input.setLocation(i);
             }
         }
 
-        if (!remainingInputs.isEmpty()) {
-            Initializer.LOGGER.error("Shader expects inputs which are not being provided: {}", remainingInputs);
+        for (var input : fragShader.inputs()) {
+            if (!providedOutputs.contains(input.name())) {
+                Initializer.LOGGER.error("Fragment shader input has no vertex output: {}", input.name());
+            }
         }
     }
 

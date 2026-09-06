@@ -255,6 +255,7 @@ public abstract class MutableQuadViewImpl extends QuadViewImpl implements QuadEm
             vertexStart += VERTEX_STRIDE;
         }
 
+		renderLayer(quad.materialInfo().layer());
 		nominalFace(quad.direction());
 		diffuseShade(quad.materialInfo().shade());
 		tintIndex(quad.materialInfo().tintIndex());

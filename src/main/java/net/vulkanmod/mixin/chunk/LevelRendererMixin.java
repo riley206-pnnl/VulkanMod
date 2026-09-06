@@ -23,6 +23,7 @@ import net.minecraft.world.level.ChunkPos;
 import net.vulkanmod.render.chunk.WorldRenderer;
 import net.vulkanmod.render.profiling.Profiler;
 import net.vulkanmod.render.vertex.TerrainRenderType;
+import net.vulkanmod.vulkan.VRenderSystem;
 import org.joml.Matrix4f;
 import org.joml.Matrix4fc;
 import org.joml.Vector4f;
@@ -102,7 +103,9 @@ public abstract class LevelRendererMixin {
                                 Matrix4fc modelView, GpuBufferSlice fog, Vector4f fogColor, boolean sky,
                                 ChunkSectionsToRender sections, CallbackInfo ci) {
         this.modelView = new Matrix4f(modelView);
-        this.projection = camera.projectionMatrix;
+        // GameRenderer adds view bobbing, hurt tilt and portal distortion after camera extraction.
+        // Match the active projection used by entities and the sky, not the unmodified camera matrix.
+        this.projection = new Matrix4f(VRenderSystem.getProjectionMatrix().buffer.asFloatBuffer());
         this.camX = camera.pos.x;
         this.camY = camera.pos.y;
         this.camZ = camera.pos.z;

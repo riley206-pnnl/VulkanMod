@@ -23,6 +23,9 @@ public class MinecraftMixin {
 
     @Shadow @Final public Options options;
 
+    @org.spongepowered.asm.mixin.Unique
+    private boolean vulkanmod$cleanupStarted;
+
     @org.spongepowered.asm.mixin.injection.ModifyVariable(method = "<init>", at = @At(value = "STORE", ordinal = 0))
     private com.mojang.blaze3d.systems.GpuBackend[] supplyVulkanBackend(com.mojang.blaze3d.systems.GpuBackend[] backends) {
         return new com.mojang.blaze3d.systems.GpuBackend[]{ new net.vulkanmod.render.engine.VkGpuBackend() };
@@ -56,9 +59,18 @@ public class MinecraftMixin {
     }
 
 
-    @Inject(method = "close", at = @At(value = "RETURN"))
+    // Release the swapchain and surface while the native window still exists.
+    @Inject(method = "close", at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/platform/Window;close()V"))
     public void close2(CallbackInfo ci) {
-        Vulkan.cleanUp();
+        if (!this.vulkanmod$cleanupStarted) {
+            this.vulkanmod$cleanupStarted = true;
+            Vulkan.cleanUp();
+        }
+    }
+
+    @Inject(method = "stop", at = @At("HEAD"))
+    private void logStopRequest(CallbackInfo ci) {
+        Initializer.LOGGER.info("Minecraft stop requested", new Throwable("Stop request call site"));
     }
 
 }

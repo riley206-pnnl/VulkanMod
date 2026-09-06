@@ -43,6 +43,7 @@
 
     "render.FogRendererMixin",
     "render.CameraMixin",
+    "render.GameRendererMixin",
     "render.GuiRendererMixin",
     "render.GlStateManagerM",
     "render.MinecraftMixin",

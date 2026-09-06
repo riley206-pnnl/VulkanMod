@@ -10,6 +10,7 @@ import net.minecraft.world.phys.Vec3;
 import net.vulkanmod.render.profiling.Profiler;
 import net.vulkanmod.render.sky.CloudRenderer;
 import org.jetbrains.annotations.Nullable;
+import org.joml.Matrix4fc;
 import org.spongepowered.asm.mixin.*;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -24,11 +25,13 @@ public abstract class LevelRendererM {
 
     @Unique private CloudRenderer vmCloudRenderer;
 
-    @Inject(method = "addCloudsPass", at = @At("HEAD"), cancellable = true)
+    // NeoForge's renderLevel calls this overload directly; the vanilla overload is only a deprecated wrapper.
+    @Inject(method = "addCloudsPass(Lcom/mojang/blaze3d/framegraph/FrameGraphBuilder;Lnet/minecraft/client/CloudStatus;Lnet/minecraft/world/phys/Vec3;JFIFILorg/joml/Matrix4fc;)V", at = @At("HEAD"), cancellable = true, require = 1)
     public void addCloudsPass(FrameGraphBuilder frameGraphBuilder, CloudStatus cloudStatus, Vec3 camPos, long gameTime, float partialTicks,
-                              int cloudColor, float cloudHeight, int cloudRange, CallbackInfo ci) {
+                              int cloudColor, float cloudHeight, int cloudRange, Matrix4fc modelViewMatrix, CallbackInfo ci) {
         if (this.vmCloudRenderer == null) {
             this.vmCloudRenderer = new CloudRenderer();
+            net.vulkanmod.Initializer.LOGGER.info("VulkanMod cloud renderer active (NeoForge clouds pass)");
         }
 
         FramePass framePass = frameGraphBuilder.addPass("clouds");

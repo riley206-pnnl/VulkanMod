@@ -54,7 +54,7 @@ public class BlockRenderer extends AbstractBlockRenderContext {
         this.blockState = blockState;
         this.random.setSeed(blockState.getSeed(blockPos));
 
-        TerrainRenderType renderType = TerrainRenderType.SOLID;
+        TerrainRenderType renderType = TerrainRenderType.getRemapped(TerrainRenderType.SOLID);
         this.renderType = renderType;
         this.terrainBuilder = this.resources.builderPack.builder(renderType);
         this.terrainBuilder.setBlockAttributes(blockState);
@@ -92,10 +92,12 @@ public class BlockRenderer extends AbstractBlockRenderContext {
 
     private TerrainBuilder getBufferBuilder(ChunkSectionLayer layer) {
         if (layer == null) {
+            this.renderType = TerrainRenderType.getRemapped(TerrainRenderType.SOLID);
             return this.terrainBuilder;
         } else {
             TerrainRenderType renderType = TerrainRenderType.get(layer);
             renderType = TerrainRenderType.getRemapped(renderType);
+            this.renderType = renderType;
             TerrainBuilder bufferBuilder = this.resources.builderPack.builder(renderType);
             bufferBuilder.setBlockAttributes(this.blockState);
 

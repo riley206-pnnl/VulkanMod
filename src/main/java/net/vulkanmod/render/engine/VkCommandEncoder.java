@@ -118,7 +118,6 @@ public class VkCommandEncoder implements CommandEncoderBackend {
             } else if (depthTexture != null && depthTexture.isClosed()) {
                 throw new IllegalStateException("Depth texture is closed");
             } else {
-                this.inRenderPass = true;
                 GpuTexture depthTexture1 = depthTexture != null ? depthTexture.texture() : null;
                 VkFbo fbo = ((VkTextureView)colorAttachmentView).getFbo(depthTexture1);
                 fbo.bind();
@@ -141,6 +140,9 @@ public class VkCommandEncoder implements CommandEncoderBackend {
 
                 Renderer.setViewport(0, 0, colorAttachmentView.getWidth(0), colorAttachmentView.getHeight(0));
                 this.lastPipeline = null;
+                // Binding the FBO can begin a frame and run completed screenshot readbacks.
+                // Those callbacks must be allowed to map buffers before this pass opens.
+                this.inRenderPass = true;
                 return new VkRenderPass(this, depthTexture != null, true);
             }
         }
