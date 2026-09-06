@@ -11,6 +11,7 @@ import net.vulkanmod.config.Config;
 import net.vulkanmod.config.Platform;
 import net.vulkanmod.config.UpdateChecker;
 import net.vulkanmod.config.gui.VOptionScreen;
+import net.vulkanmod.shaders.ShaderPackManager;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -35,6 +36,10 @@ public class Initializer {
 		Path configPath = FMLPaths.CONFIGDIR.get().resolve("vulkanmod_settings.json");
 		CONFIG = loadConfig(configPath);
 		Platform.init();
+		// Renderer initialization can happen before FMLClientSetupEvent. Load
+		// shader packs here so PipelineManager sees the selected pack when it
+		// constructs Vulkan pipelines.
+		ShaderPackManager.init(FMLPaths.GAMEDIR.get());
 
 		modEventBus.addListener(this::onInitializeClient);
 	}

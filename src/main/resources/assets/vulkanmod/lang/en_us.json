@@ -58,5 +58,8 @@
 
   "vulkanmod.options.textureAnimations": "Texture Animations",
 
+  "vulkanmod.options.shaderPackEnabled": "Enable Shaders",
+  "vulkanmod.options.shaderPackEnabled.tooltip": "Loads the selected shader pack. Requires restarting Minecraft.",
+
   "vulkanmod.options.searchFieldPlaceholder": "Search Graphics Settings"
 }

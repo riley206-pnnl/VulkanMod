@@ -30,6 +30,26 @@ public class Config {
     public boolean backFaceCulling = true;
     public boolean textureAnimations = true;
 
+    /** Whether the configured shader pack should be loaded at startup. */
+    public boolean shaderPackEnabled = true;
+    public String shaderPack = "";
+
+    public String getShaderPackName() {
+        return shaderPack == null ? "" : shaderPack;
+    }
+
+    public void setShaderPack(String name) {
+        this.shaderPack = name == null ? "" : name;
+    }
+
+    public boolean hasShaderPack() {
+        return !getShaderPackName().isEmpty();
+    }
+
+    public boolean isShaderPackEnabled() {
+        return shaderPackEnabled;
+    }
+
     public void write() {
         if (!Files.exists(CONFIG_PATH.getParent())) {
             try {

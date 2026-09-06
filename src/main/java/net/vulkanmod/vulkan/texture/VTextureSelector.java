@@ -82,15 +82,19 @@ public abstract class VTextureSelector {
 
     public static int getTextureIdx(String name) {
         return switch (name) {
-            case "Sampler0", "DiffuseSampler", "InSampler", "CloudFaces", "Sprite", "CurrentSprite" -> 0;
+            case "Sampler0", "DiffuseSampler", "InSampler", "CloudFaces", "Sprite", "CurrentSprite", "tex" -> 0;
             case "Sampler1", "BlurSampler", "NextSprite" -> 1;
-            case "Sampler2" -> 2;
+            case "Sampler2", "LightTexture", "lightmap" -> 2;
             case "Sampler3" -> 3;
             case "Sampler4" -> 4;
             case "Sampler5" -> 5;
             case "Sampler6" -> 6;
             case "Sampler7" -> 7;
-            default -> -1;
+            // Pack auxiliary buffers (colortex*, depthtex*, shadowtex*,
+            // normals, etc.) are not created by the first terrain pass. Keep
+            // them away from the block atlas; bindShaderTextures supplies a
+            // white fallback for this reserved slot.
+            default -> SIZE - 1;
         };
     }
 
@@ -100,8 +104,10 @@ public abstract class VTextureSelector {
         for (ImageDescriptor state : imageDescriptors) {
             var textureView = VRenderSystem.getShaderTexture(state.imageIdx);
 
-            if (textureView == null)
+            if (textureView == null) {
+                VTextureSelector.bindTexture(state.imageIdx, whiteTexture);
                 continue;
+            }
 
             VkGpuTexture gpuTexture = (VkGpuTexture) textureView.texture();
 
@@ -110,6 +116,8 @@ public abstract class VTextureSelector {
 
             if (texture != null && texture.getVulkanImage() != null) {
                 VTextureSelector.bindTexture(state.imageIdx, texture.getVulkanImage());
+            } else {
+                VTextureSelector.bindTexture(state.imageIdx, whiteTexture);
             }
             // TODO
 //            else {

@@ -66,6 +66,9 @@ public class TerrainBufferBuilder implements VertexConsumer {
     }
 
     public void end() {
+        if (this.vertexBuilder instanceof VertexBuilder.DefaultVertexBuilder) {
+            VertexBuilder.DefaultVertexBuilder.completeQuadNormals(this.bufferPtr, this.vertices);
+        }
     }
 
     public void clear() {
@@ -100,6 +103,8 @@ public class TerrainBufferBuilder implements VertexConsumer {
 		this.endVertex();
 
 		this.vertexBuilder.position(this.elementPtr, x, y, z);
+        // A producer using the modern BLOCK contract may never call setNormal.
+        this.vertexBuilder.normal(this.elementPtr, 0);
 
 		return this;
 	}
@@ -162,6 +167,7 @@ public class TerrainBufferBuilder implements VertexConsumer {
 
 	@Override
 	public VertexConsumer setUv2(int i, int j) {
+        this.vertexBuilder.light(this.elementPtr, (i & 0xFFFF) | ((j & 0xFFFF) << 16));
 		return this;
 	}
 }

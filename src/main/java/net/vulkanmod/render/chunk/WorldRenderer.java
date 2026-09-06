@@ -33,6 +33,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.Vec3;
 import net.vulkanmod.Initializer;
 import net.vulkanmod.render.shader.PipelineManager;
+import net.vulkanmod.shaders.PackTerrainPipeline;
 import net.vulkanmod.render.chunk.buffer.DrawBuffers;
 import net.vulkanmod.render.chunk.build.RenderRegionBuilder;
 import net.vulkanmod.render.chunk.build.task.TaskDispatcher;
@@ -378,6 +379,7 @@ public class WorldRenderer {
 
         VRenderSystem.setTextureSize(atlasTexWidth, atlasTexHeight);
         VRenderSystem.setCurrentTime((int) System.currentTimeMillis());
+        PackTerrainPipeline.update(pipeline);
 
         long currentTimeMs = System.currentTimeMillis();
         float fadeTime = Minecraft.getInstance().options.chunkSectionFadeInTime().get().floatValue();
@@ -424,7 +426,7 @@ public class WorldRenderer {
                 }
             }
             if (renderType == TerrainRenderType.SOLID && areaCount > 0) {
-                Initializer.LOGGER.info("VulkanMod DRAW: renderType={}, areas={}, drawn={}, noBuffer={}, emptyQueue={}", renderType, areaCount, drawnCount, noBufferCount, emptyQueueCount);
+                Initializer.LOGGER.debug("VulkanMod DRAW: renderType={}, areas={}, drawn={}, noBuffer={}, emptyQueue={}", renderType, areaCount, drawnCount, noBufferCount, emptyQueueCount);
             }
         }
 

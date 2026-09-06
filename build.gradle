@@ -53,6 +53,7 @@ project.ext.devNatives = host.windows ? "natives-windows"
         : "natives-linux"
 
 dependencies {
+    testImplementation "junit:junit:4.13.2"
     // Standard LWJGL for Vulkan
     implementation "org.lwjgl:lwjgl-vulkan:$lwjglVersion"
     implementation "org.lwjgl:lwjgl-shaderc:$lwjglVersion"
@@ -62,6 +63,9 @@ dependencies {
     runtimeOnly "org.lwjgl:lwjgl-shaderc:$lwjglVersion:$devNatives"
     runtimeOnly "org.lwjgl:lwjgl-spvc:$lwjglVersion:$devNatives"
     runtimeOnly "org.lwjgl:lwjgl-vma:$lwjglVersion:$devNatives"
+    testRuntimeOnly "org.lwjgl:lwjgl:$lwjglVersion:$devNatives"
+    testRuntimeOnly "org.lwjgl:lwjgl-shaderc:$lwjglVersion:$devNatives"
+    testRuntimeOnly "org.lwjgl:lwjgl-spvc:$lwjglVersion:$devNatives"
 
     // Bundle them for production via JarJar
     jarJar "org.lwjgl:lwjgl-vulkan:$lwjglVersion"
@@ -168,4 +172,27 @@ tasks.named('jar') {
         jarFile.delete()
         ant.zip(destfile: jarFile, basedir: tmpDir)
     }
+}
+tasks.register('runTestShader', JavaExec) {
+    classpath = sourceSets.test.runtimeClasspath + sourceSets.main.compileClasspath
+    mainClass = 'net.vulkanmod.TestShader'
+}
+tasks.register('runShaderPack', JavaExec) {
+    classpath = sourceSets.test.runtimeClasspath + sourceSets.main.compileClasspath
+    mainClass = 'net.vulkanmod.TestShaderPack'
+    args = project.hasProperty('args') ? project.property('args').split(' ') : ['/tmp/opencode/cpl', 'gbuffers_terrain', 'world0']
+}
+
+tasks.register('runBigSource', JavaExec) {
+    classpath = sourceSets.test.runtimeClasspath + sourceSets.main.compileClasspath
+    mainClass = 'net.vulkanmod.TestBigSource'
+    maxHeapSize = '2g'
+    jvmArgs = ['-Xss128m']
+}
+
+
+// NeoForge provides Minecraft/JOML on the main compile classpath only.
+sourceSets.test.compileClasspath += sourceSets.main.compileClasspath
+tasks.named('test') {
+    classpath += sourceSets.main.compileClasspath
 }

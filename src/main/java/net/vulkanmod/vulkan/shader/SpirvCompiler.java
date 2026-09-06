@@ -10,6 +10,8 @@ import org.lwjgl.vulkan.VK12;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.HashMap;
+import java.util.Map;
 
 import static org.lwjgl.system.MemoryUtil.NULL;
 import static org.lwjgl.system.MemoryUtil.memASCII;
@@ -28,6 +30,14 @@ public class SpirvCompiler {
     private static final long pUserData = 0;
 
     private static ObjectArrayList<String> includePaths;
+
+    /**
+     * Transformed GLSL supplied in-process (used for shader packs). Contents are
+     * served by the includer instead of the classpath. Registering a large source
+     * here avoids LWJGL's MemoryStack cap (~64KB) on the straw entry shader that
+     * {@code #include}s it.
+     */
+    private static final Map<String, String> VIRTUAL_INCLUDES = new HashMap<>();
 
     static {
         init();
@@ -64,6 +74,22 @@ public class SpirvCompiler {
 
     public static void addIncludePath(String path) {
         includePaths.add(path.endsWith("/") ? path : path + "/");
+    }
+
+    /** Serve {@code content} as an includable resource named {@code name}. */
+    public static void addVirtualInclude(String name, String content) {
+        VIRTUAL_INCLUDES.put(name, content);
+    }
+
+    /** Compile a virtual include as the whole program via a tiny entry shader. */
+    public static SPIRV compileVirtualShader(String filename, String includeName, ShaderKind shaderKind) {
+        String content = VIRTUAL_INCLUDES.get(includeName);
+        if (content == null) {
+            throw new IllegalArgumentException("No virtual include registered: " + includeName);
+        }
+        // The entry provides the version so the (transformed) include body must not
+        // redeclare it; the 64KB MemoryStack cap only applies to this tiny string.
+        return compileShader(filename, "#version 450\n#include \"" + includeName + "\"", shaderKind);
     }
 
     public static SPIRV compileShader(String filename, String source, ShaderKind shaderKind) {
@@ -105,6 +131,11 @@ public class SpirvCompiler {
         public long invoke(long user_data, long requested_source, int type, long requesting_source, long include_depth) {
             var requesting = memASCII(requesting_source);
             var requested = memASCII(requested_source);
+
+            String virtual = VIRTUAL_INCLUDES.get(requested);
+            if (virtual != null) {
+                return includeResult(requested, virtual, user_data);
+            }
 
             try {
                 for (String includePath : includePaths) {

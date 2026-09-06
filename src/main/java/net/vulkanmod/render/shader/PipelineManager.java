@@ -8,6 +8,9 @@ import net.vulkanmod.render.chunk.build.thread.ThreadBuilderPack;
 import net.vulkanmod.render.vertex.CustomVertexFormat;
 import net.vulkanmod.render.vertex.TerrainRenderType;
 import net.vulkanmod.vulkan.shader.*;
+import net.vulkanmod.shaders.PackTerrainPipeline;
+import net.vulkanmod.shaders.ShaderPackManager;
+import net.vulkanmod.Initializer;
 
 import java.util.function.Function;
 
@@ -16,7 +19,7 @@ public abstract class PipelineManager {
 
     static GraphicsPipeline
             terrainShader, terrainShaderEarlyZ,
-            fastBlitPipeline, cloudsPipeline;
+            fastBlitPipeline, cloudsPipeline, packTerrainShader;
 
     private static Function<TerrainRenderType, GraphicsPipeline> shaderGetter;
 
@@ -24,6 +27,18 @@ public abstract class PipelineManager {
         setTerrainVertexFormat(CustomVertexFormat.COMPRESSED_TERRAIN);
         createBasicPipelines();
         setDefaultTerrainShaderGetter();
+        if (Initializer.CONFIG.isShaderPackEnabled()
+                && ShaderPackManager.get() != null && ShaderPackManager.get().hasActivePack()) {
+            try {
+                packTerrainShader = PackTerrainPipeline.create(ShaderPackManager.get().getActivePack(), "world0");
+                setTerrainVertexFormat(CustomVertexFormat.TERRAIN);
+                setShaderGetter(renderType -> packTerrainShader);
+                Initializer.LOGGER.info("Shader-pack terrain pipeline active (direct terrain; shadows and temporal effects unavailable): {}", ShaderPackManager.get().getActivePack().getName());
+            } catch (Exception e) {
+                Initializer.LOGGER.error("Failed to initialize shader-pack terrain pipeline; using built-in shaders", e);
+                packTerrainShader = null;
+            }
+        }
         ThreadBuilderPack.defaultTerrainBuilderConstructor();
     }
 
@@ -114,5 +129,9 @@ public abstract class PipelineManager {
         terrainShader.cleanUp();
         fastBlitPipeline.cleanUp();
         cloudsPipeline.cleanUp();
+        if (packTerrainShader != null) {
+            packTerrainShader.cleanUp();
+            PackTerrainPipeline.release(packTerrainShader);
+        }
     }
 }

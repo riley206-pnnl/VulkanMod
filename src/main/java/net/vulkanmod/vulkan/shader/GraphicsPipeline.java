@@ -6,6 +6,7 @@ import com.mojang.blaze3d.vertex.VertexFormatElement;
 import it.unimi.dsi.fastutil.objects.Object2LongMap;
 import it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap;
 import net.vulkanmod.interfaces.VertexFormatMixed;
+import net.vulkanmod.render.vertex.CustomVertexFormat;
 import net.vulkanmod.vulkan.Renderer;
 import net.vulkanmod.vulkan.Vulkan;
 import net.vulkanmod.vulkan.device.DeviceManager;
@@ -314,7 +315,15 @@ public class GraphicsPipeline extends Pipeline {
         for (int i = 0; i < size; ++i) {
             VkVertexInputAttributeDescription posDescription = attributeDescriptions.get(i);
             posDescription.binding(0);
-            posDescription.location(i);
+            // Pack terrain shaders use the legacy Iris attribute locations:
+            // mc_Entity/midCoord (0/1), Position/Normal/Color/UV0/UV2
+            // (4/5/6/7/8). The metadata attributes are currently constants
+            // emitted by ShaderProcessor, so only the five real attributes
+            // are described here.
+            int location = vertexFormat == CustomVertexFormat.TERRAIN
+                    ? switch (i) { case 0 -> 4; case 1 -> 6; case 2 -> 7; case 3 -> 8; case 4 -> 5; default -> i; }
+                    : i;
+            posDescription.location(location);
 
             VertexFormatElement formatElement = elements.get(i);
             int id = formatElement.id();

@@ -110,6 +110,15 @@ public class TerrainBuilder {
         }
 
         int vertexCount = this.quadSorter.getVertexCount();
+        // Solid and cutout terrain do not initialize the quad sorter because
+        // they do not need translucent quad sorting. Their vertex count still
+        // needs to be carried into the draw state so the per-facing buffers
+        // can be uploaded and indexed.
+        if (vertexCount == 0) {
+            for (TerrainBufferBuilder bufferBuilder : this.bufferBuilders) {
+                vertexCount += bufferBuilder.getVertices();
+            }
+        }
 
         int indexCount = vertexCount / 4 * 6;
 

@@ -39,6 +39,8 @@ public class DrawBuffers {
 
     private final int index;
     public final int vertexSize = PipelineManager.getTerrainVertexFormat().getVertexSize();
+    private final float positionOffset = PipelineManager.getTerrainVertexFormat() == CustomVertexFormat.COMPRESSED_TERRAIN
+            ? POS_OFFSET : 0.0f;
     private final Vector3i origin;
     private final int minHeight;
 
@@ -216,9 +218,9 @@ public class DrawBuffers {
     }
 
     private void updateChunkAreaOrigin(VkCommandBuffer commandBuffer, Pipeline pipeline, double camX, double camY, double camZ, MemoryStack stack) {
-        float xOffset = (float) ((this.origin.x) + POS_OFFSET - camX);
-        float yOffset = (float) ((this.origin.y) + POS_OFFSET - camY);
-        float zOffset = (float) ((this.origin.z) + POS_OFFSET - camZ);
+        float xOffset = (float) ((this.origin.x) + positionOffset - camX);
+        float yOffset = (float) ((this.origin.y) + positionOffset - camY);
+        float zOffset = (float) ((this.origin.z) + positionOffset - camZ);
 
         ByteBuffer byteBuffer = stack.malloc(12);
 

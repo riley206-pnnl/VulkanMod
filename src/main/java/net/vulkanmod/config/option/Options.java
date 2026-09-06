@@ -258,6 +258,11 @@ public abstract class Options {
 
         return new OptionBlock[]{
                 new OptionBlock("", new Option<?>[]{
+                        new SwitchOption(Component.translatable("vulkanmod.options.shaderPackEnabled"),
+                                value -> config.shaderPackEnabled = value,
+                                () -> config.shaderPackEnabled)
+                                .setTooltip(value -> Component.translatable("vulkanmod.options.shaderPackEnabled.tooltip"))
+                                .setImpact(PerformanceImpact.HIGH),
                         new RangeOption(Component.translatable("options.renderDistance"),
                                 2, 32, 1,
                                 value -> mcOptions.renderDistance().set(value),
