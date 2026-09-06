@@ -40,4 +40,8 @@ public interface MainPass {
         return null;
     }
 
+    default GpuTextureView getDepthAttachmentView() {
+        return null;
+    }
+
 }

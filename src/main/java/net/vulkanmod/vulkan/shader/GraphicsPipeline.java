@@ -317,12 +317,12 @@ public class GraphicsPipeline extends Pipeline {
             posDescription.location(i);
 
             VertexFormatElement formatElement = elements.get(i);
-            VertexFormatElement.Usage usage = formatElement.usage();
+            int id = formatElement.id();
             VertexFormatElement.Type type = formatElement.type();
             int elementCount = formatElement.count();
 
-            switch (usage) {
-                case POSITION -> {
+            switch (id) {
+                case 0 -> { // POSITION
                     switch (type) {
                         case FLOAT -> {
                             posDescription.format(VK_FORMAT_R32G32B32_SFLOAT);
@@ -346,7 +346,7 @@ public class GraphicsPipeline extends Pipeline {
 
                 }
 
-                case COLOR -> {
+                case 1 -> { // COLOR
                     switch (type) {
                         case UBYTE -> {
                             posDescription.format(VK_FORMAT_R8G8B8A8_UNORM);
@@ -363,7 +363,7 @@ public class GraphicsPipeline extends Pipeline {
                     }
                 }
 
-                case UV -> {
+                case 2, 3, 4 -> { // UV / UV0 / UV1 / UV2
                     switch (type) {
                         case FLOAT -> {
                             posDescription.format(VK_FORMAT_R32G32_SFLOAT);
@@ -392,14 +392,14 @@ public class GraphicsPipeline extends Pipeline {
                     }
                 }
 
-                case NORMAL -> {
+                case 5 -> { // NORMAL
                     posDescription.format(VK_FORMAT_R8G8B8A8_SNORM);
                     posDescription.offset(offset);
 
                     offset += 4;
                 }
 
-                case GENERIC -> {
+                default -> { // GENERIC / OTHER
                     if (type == VertexFormatElement.Type.SHORT && elementCount == 1) {
                         posDescription.format(VK_FORMAT_R16_SINT);
                         posDescription.offset(offset);
@@ -419,11 +419,9 @@ public class GraphicsPipeline extends Pipeline {
                         offset += 4;
                     }
                     else {
-                        throw new RuntimeException(String.format("Unknown type: %s", type));
+                        throw new RuntimeException(String.format("Unknown format element id: %s type: %s", id, type));
                     }
                 }
-
-                default -> throw new RuntimeException(String.format("Unknown format: %s", usage));
             }
 
             posDescription.offset(((VertexFormatMixed) (vertexFormat)).getOffset(i));

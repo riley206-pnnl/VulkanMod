@@ -35,6 +35,7 @@ public class DefaultMainPass implements MainPass {
     private GpuTextureView[] colorAttachmentTextureViews;
     IntSupplier imageIdxSupplier;
     private GpuTexture depthAttachmentTexture;
+    private GpuTextureView depthAttachmentTextureView;
 
     DefaultMainPass() {
         createResources();
@@ -173,8 +174,13 @@ public class DefaultMainPass implements MainPass {
         return this.depthAttachmentTexture;
     }
 
+    @Override
+    public GpuTextureView getDepthAttachmentView() {
+        return this.depthAttachmentTextureView;
+    }
+
     private void createAttachmentTextures() {
-        VkGpuDevice device = (VkGpuDevice) RenderSystem.getDevice();
+        VkGpuDevice device = VkGpuDevice.getInstance();
 
         SwapChain swapChain = Renderer.getInstance().getSwapChain();
         if (this.mainFramebuffer == swapChain) {
@@ -207,5 +213,6 @@ public class DefaultMainPass implements MainPass {
         }
 
         this.depthAttachmentTexture = device.gpuTextureFromVulkanImage(this.mainFramebuffer.getDepthAttachment());
+        this.depthAttachmentTextureView = device.createTextureView(this.depthAttachmentTexture);
     }
 }

@@ -18,10 +18,10 @@ package net.vulkanmod.render.chunk.build.frapi.mesh;
 
 import java.util.function.Consumer;
 
-import net.fabricmc.fabric.api.renderer.v1.mesh.Mesh;
-import net.fabricmc.fabric.api.renderer.v1.mesh.MutableMesh;
-import net.fabricmc.fabric.api.renderer.v1.mesh.MutableQuadView;
-import net.fabricmc.fabric.api.renderer.v1.mesh.QuadEmitter;
+import net.vulkanmod.render.chunk.build.frapi.helper.fabric.interfaces.Mesh;
+import net.vulkanmod.render.chunk.build.frapi.helper.fabric.interfaces.MutableMesh;
+import net.vulkanmod.render.chunk.build.frapi.helper.fabric.interfaces.MutableQuadView;
+import net.vulkanmod.render.chunk.build.frapi.helper.fabric.interfaces.QuadEmitter;
 
 /**
  * Our implementation of {@link MutableMesh}, mainly used for optimized mesh creation.
@@ -30,7 +30,7 @@ import net.fabricmc.fabric.api.renderer.v1.mesh.QuadEmitter;
  * All the encoding and other work is handled in the quad base classes.
  * The one interesting bit is in {@link #emitter}.
  */
-public class MutableMeshImpl extends MeshViewImpl implements MutableMesh {
+public class MutableMeshImpl extends MeshImpl implements MutableMesh {
     private final MutableQuadViewImpl emitter = new MutableQuadViewImpl() {
         @Override
         protected void emitDirectly() {

@@ -25,13 +25,11 @@ public abstract class RenderSystemMixin {
     @Shadow private static SamplerCache samplerCache;
     @Shadow private static String apiDescription;
 
-    @Overwrite(remap = false)
-    public static void initRenderer(long l, int i, boolean bl, ShaderSource shaderSource, boolean bl2) {
+    @Overwrite
+    public static void initRenderer(GpuDevice device) {
         renderThread.setPriority(Thread.NORM_PRIORITY + 2);
 
-        VRenderSystem.initRenderer();
-
-        DEVICE = new VkGpuDevice(l, i, bl, shaderSource, bl2);
+        DEVICE = device;
         apiDescription = getDevice().getImplementationInformation();
 
         Renderer.initRenderer();

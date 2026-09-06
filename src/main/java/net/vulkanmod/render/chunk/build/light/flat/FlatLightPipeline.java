@@ -1,6 +1,6 @@
 package net.vulkanmod.render.chunk.build.light.flat;
 
-import net.minecraft.client.renderer.LightTexture;
+import net.minecraft.util.LightCoordsUtil;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.vulkanmod.render.chunk.util.SimpleDirection;
@@ -47,7 +47,7 @@ public class FlatLightPipeline implements LightPipeline {
         }
 
         Arrays.fill(out.lm, lightmap);
-        Arrays.fill(out.br, this.lightCache.getRegion().getShade(lightFace, shade));
+        Arrays.fill(out.br, shade ? this.lightCache.getRegion().cardinalLighting().byFace(lightFace) : 1.0F);
     }
 
     private int getLightmap(BlockPos pos, Direction face) {
@@ -55,7 +55,7 @@ public class FlatLightPipeline implements LightPipeline {
 
         // Check emissivity of the origin state
         if (unpackEM(word)) {
-            return LightTexture.FULL_BRIGHT;
+            return LightCoordsUtil.FULL_BRIGHT;
         }
 
         int adjWord = this.lightCache.get(pos, SimpleDirection.of(face));

@@ -41,6 +41,7 @@ import java.util.List;
 import java.util.Set;
 
 import static net.vulkanmod.vulkan.Vulkan.*;
+import static org.lwjgl.glfw.GLFW.glfwGetFramebufferSize;
 import static org.lwjgl.opengl.GL11.GL_COLOR_BUFFER_BIT;
 import static org.lwjgl.opengl.GL11.GL_DEPTH_BUFFER_BIT;
 import static org.lwjgl.system.MemoryStack.stackPush;
@@ -275,8 +276,13 @@ public class Renderer {
                 int vkResult = vkAcquireNextImageKHR(device, swapChain.getId(), VUtil.UINT64_MAX,
                                                      semaphore, VK_NULL_HANDLE, pImageIndex);
 
-                if (vkResult == VK_SUBOPTIMAL_KHR || vkResult == VK_ERROR_OUT_OF_DATE_KHR || swapChainUpdate) {
+                if (vkResult == VK_ERROR_OUT_OF_DATE_KHR) {
                     swapChainUpdate = true;
+                }
+                else if (vkResult == VK_SUBOPTIMAL_KHR) {
+                    if (checkExtentChanged()) {
+                        swapChainUpdate = true;
+                    }
                 }
                 else if (vkResult != VK_SUCCESS) {
                     throw new RuntimeException("Cannot acquire next swap chain image: %s".formatted(VkResult.decode(vkResult)));
@@ -402,9 +408,12 @@ public class Renderer {
 
                 vkResult = vkQueuePresentKHR(DeviceManager.getPresentQueue().vkQueue(), presentInfo);
 
-                if (vkResult == VK_ERROR_OUT_OF_DATE_KHR || vkResult == VK_SUBOPTIMAL_KHR || swapChainUpdate) {
+                if (vkResult == VK_ERROR_OUT_OF_DATE_KHR) {
                     swapChainUpdate = true;
-                    return;
+                } else if (vkResult == VK_SUBOPTIMAL_KHR) {
+                    if (checkExtentChanged()) {
+                        swapChainUpdate = true;
+                    }
                 } else if (vkResult != VK_SUCCESS) {
                     throw new RuntimeException("Failed to present rendered frame: %s".formatted(VkResult.decode(vkResult)));
                 }
@@ -567,6 +576,7 @@ public class Renderer {
 
     @SuppressWarnings("UnreachableCode")
     private void recreateSwapChain() {
+        Initializer.LOGGER.info("VulkanMod: SwapChain recreated ({}x{})", swapChain.getWidth(), swapChain.getHeight());
         submitUploads();
         waitFences();
         Vulkan.waitIdle();
@@ -599,7 +609,7 @@ public class Renderer {
         this.mainPass.onResize();
 
         this.onResizeCallbacks.forEach(Runnable::run);
-        ((WindowAccessor) (Object) Minecraft.getInstance().getWindow()).getEventHandler().resizeDisplay();
+        ((WindowAccessor) (Object) Minecraft.getInstance().getWindow()).getEventHandler().resizeGui();
 
         currentFrame = 0;
     }
@@ -886,6 +896,17 @@ public class Renderer {
 
     public static boolean isRecording() {
         return INSTANCE.recordingCmds;
+    }
+
+    private boolean checkExtentChanged() {
+        if (Vulkan.window == 0 || this.swapChain == null) return false;
+        try (MemoryStack stack = stackPush()) {
+            IntBuffer width = stack.ints(0);
+            IntBuffer height = stack.ints(0);
+            glfwGetFramebufferSize(Vulkan.window, width, height);
+            VkExtent2D currentExtent = this.swapChain.getExtent();
+            return currentExtent == null || currentExtent.width() != width.get(0) || currentExtent.height() != height.get(0);
+        }
     }
 
     public static void scheduleSwapChainUpdate() {

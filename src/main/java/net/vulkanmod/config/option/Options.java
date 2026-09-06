@@ -167,7 +167,7 @@ public abstract class Options {
                                 value -> Component.translatable(value == 0 ? "options.guiScale.auto" : String.valueOf(value)),
                                 value -> {
                                     mcOptions.guiScale().set(value);
-                                    minecraft.resizeDisplay();
+                                    minecraft.resizeGui();
                                 },
                                 () -> mcOptions.guiScale().get()),
                         new RangeOption(Component.translatable("options.gamma"),

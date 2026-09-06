@@ -17,18 +17,17 @@ package net.vulkanmod.render.chunk.build.frapi.render;
 
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
-import net.fabricmc.fabric.api.renderer.v1.render.BlockVertexConsumerProvider;
-import net.minecraft.client.renderer.ItemBlockRenderTypes;
-import net.minecraft.client.renderer.LightTexture;
-import net.minecraft.client.renderer.block.model.BlockStateModel;
+import net.minecraft.util.LightCoordsUtil;
+import net.minecraft.client.renderer.block.dispatch.BlockStateModel;
 import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.util.ARGB;
 import net.minecraft.util.Mth;
 import net.minecraft.util.RandomSource;
-import net.minecraft.world.level.BlockAndTintGetter;
+import net.minecraft.client.renderer.block.BlockAndTintGetter;
 import net.minecraft.world.level.block.state.BlockState;
 import net.vulkanmod.render.chunk.build.frapi.helper.ColorHelper;
+import net.vulkanmod.render.chunk.build.frapi.helper.fabric.interfaces.FabricBlockStateModel;
 import net.vulkanmod.render.chunk.build.frapi.mesh.MutableQuadViewImpl;
 import org.jetbrains.annotations.Nullable;
 
@@ -37,7 +36,7 @@ public class SimpleBlockRenderContext extends AbstractRenderContext {
 
     private final RandomSource random = RandomSource.create();
 
-    private BlockVertexConsumerProvider vertexConsumers;
+    private VertexConsumer vertexConsumers;
     private ChunkSectionLayer defaultRenderLayer;
     private float red;
     private float green;
@@ -58,7 +57,7 @@ public class SimpleBlockRenderContext extends AbstractRenderContext {
         if (renderLayer == lastRenderLayer) {
             vertexConsumer = lastVertexConsumer;
         } else {
-            lastVertexConsumer = vertexConsumer = vertexConsumers.getBuffer(renderLayer);
+            lastVertexConsumer = vertexConsumer = vertexConsumers;
             lastRenderLayer = renderLayer;
         }
 
@@ -82,7 +81,7 @@ public class SimpleBlockRenderContext extends AbstractRenderContext {
     private void shadeQuad(MutableQuadViewImpl quad, boolean emissive) {
         if (emissive) {
             for (int i = 0; i < 4; i++) {
-                quad.lightmap(i, LightTexture.FULL_BRIGHT);
+                quad.lightmap(i, LightCoordsUtil.FULL_BRIGHT);
             }
         } else {
             final int light = this.light;
@@ -93,12 +92,12 @@ public class SimpleBlockRenderContext extends AbstractRenderContext {
         }
     }
 
-    public void bufferModel(PoseStack.Pose entry, BlockVertexConsumerProvider vertexConsumers, BlockStateModel model, float red, float green, float blue, int light, int overlay, BlockAndTintGetter blockView, BlockPos pos, BlockState state) {
+    public void bufferModel(PoseStack.Pose entry, VertexConsumer vertexConsumers, BlockStateModel model, float red, float green, float blue, int light, int overlay, BlockAndTintGetter blockView, BlockPos pos, BlockState state) {
         matrices = entry;
         this.overlay = overlay;
 
         this.vertexConsumers = vertexConsumers;
-        this.defaultRenderLayer = ItemBlockRenderTypes.getChunkRenderType(state);
+        this.defaultRenderLayer = ChunkSectionLayer.SOLID;
         this.red = Mth.clamp(red, 0, 1);
         this.green = Mth.clamp(green, 0, 1);
         this.blue = Mth.clamp(blue, 0, 1);
@@ -106,7 +105,7 @@ public class SimpleBlockRenderContext extends AbstractRenderContext {
 
         random.setSeed(42L);
 
-        model.emitQuads(getEmitter(), blockView, pos, state, random, cullFace -> false);
+        ((FabricBlockStateModel)model).emitQuads(getEmitter(), blockView, pos, state, random, cullFace -> false);
 
         matrices = null;
         this.vertexConsumers = null;

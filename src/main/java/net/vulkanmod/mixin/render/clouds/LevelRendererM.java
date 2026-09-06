@@ -26,7 +26,7 @@ public abstract class LevelRendererM {
 
     @Inject(method = "addCloudsPass", at = @At("HEAD"), cancellable = true)
     public void addCloudsPass(FrameGraphBuilder frameGraphBuilder, CloudStatus cloudStatus, Vec3 camPos, long gameTime, float partialTicks,
-                              int cloudColor, float cloudHeight, CallbackInfo ci) {
+                              int cloudColor, float cloudHeight, int cloudRange, CallbackInfo ci) {
         if (this.vmCloudRenderer == null) {
             this.vmCloudRenderer = new CloudRenderer();
         }

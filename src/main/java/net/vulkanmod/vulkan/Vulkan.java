@@ -32,10 +32,11 @@ import java.util.stream.Collectors;
 import static java.util.stream.Collectors.toSet;
 import static net.vulkanmod.vulkan.queue.Queue.getQueueFamilies;
 import static net.vulkanmod.vulkan.util.VUtil.asPointerBuffer;
-import static org.lwjgl.glfw.GLFWVulkan.glfwCreateWindowSurface;
+import static org.lwjgl.glfw.GLFWVulkan.nglfwCreateWindowSurface;
 import static org.lwjgl.glfw.GLFWVulkan.glfwGetRequiredInstanceExtensions;
 import static org.lwjgl.system.MemoryStack.*;
 import static org.lwjgl.system.MemoryUtil.NULL;
+import static org.lwjgl.system.MemoryUtil.memAddress;
 import static org.lwjgl.util.vma.Vma.vmaCreateAllocator;
 import static org.lwjgl.util.vma.Vma.vmaDestroyAllocator;
 import static org.lwjgl.vulkan.EXTDebugUtils.*;
@@ -100,13 +101,21 @@ public class Vulkan {
         createCommandPool();
     }
 
+    public static void initVulkanIfNeeded(long window) {
+        if (!Instance.isCreated()) {
+            initVulkan(window);
+        }
+    }
+
     public static void createSurface(long handle) {
         window = handle;
 
         try (MemoryStack stack = stackPush()) {
             LongBuffer pSurface = stack.longs(VK_NULL_HANDLE);
 
-            checkResult(glfwCreateWindowSurface(Instance.instance, window, null, pSurface),
+            // Launcher-loaded GLFW cannot resolve Vulkan types in NeoForge's mod classloader.
+            // Pass native addresses so the GLFW wrapper never needs to load VkInstance.
+            checkResult(nglfwCreateWindowSurface(Instance.instance.address(), window, NULL, memAddress(pSurface)),
                         "Failed to create window surface");
 
             surface = pSurface.get(0);
@@ -247,7 +256,15 @@ public class Vulkan {
         public static Set<String> instanceExtensions;
         private static VkInstance instance;
 
-        private static void createInstance() {
+        private static boolean created;
+
+        private static boolean isCreated() {
+            return created;
+        }
+
+        private static synchronized void createInstance() {
+            if (created) return;
+            created = true;
             if (ENABLE_VALIDATION_LAYERS && !Debug.checkValidationLayerSupport()) {
                 throw new RuntimeException("Validation requested but not supported");
             }
@@ -496,4 +513,3 @@ public class Vulkan {
         }
     }
 }
-

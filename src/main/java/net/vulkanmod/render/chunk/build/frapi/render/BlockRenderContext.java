@@ -2,18 +2,17 @@ package net.vulkanmod.render.chunk.build.frapi.render;
 
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
-import net.fabricmc.fabric.api.renderer.v1.mesh.ShadeMode;
-import net.fabricmc.fabric.api.renderer.v1.render.BlockVertexConsumerProvider;
-import net.fabricmc.fabric.api.util.TriState;
-import net.minecraft.client.renderer.ItemBlockRenderTypes;
-import net.minecraft.client.renderer.block.model.BlockStateModel;
+import net.minecraft.util.TriState;
+import net.minecraft.client.renderer.block.dispatch.BlockStateModel;
 import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.util.RandomSource;
-import net.minecraft.world.level.BlockAndTintGetter;
+import net.minecraft.client.renderer.block.BlockAndTintGetter;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import net.vulkanmod.Initializer;
+import net.vulkanmod.render.chunk.build.frapi.helper.fabric.interfaces.FabricBlockStateModel;
+import net.vulkanmod.render.chunk.build.frapi.helper.fabric.ShadeMode;
 import net.vulkanmod.render.chunk.build.frapi.mesh.MutableQuadViewImpl;
 import net.vulkanmod.render.chunk.build.light.LightMode;
 import net.vulkanmod.render.chunk.build.light.LightPipeline;
@@ -28,12 +27,13 @@ import net.vulkanmod.render.chunk.build.light.smooth.SmoothLightPipeline;
 public class BlockRenderContext extends AbstractBlockRenderContext {
 	public static final ThreadLocal<BlockRenderContext> POOL = ThreadLocal.withInitial(BlockRenderContext::new);
 
-	private BlockVertexConsumerProvider vertexConsumers;
+	private VertexConsumer vertexConsumers;
     private ChunkSectionLayer defaultRenderLayer;
 
 	private final ArrayLightDataCache lightDataCache = new ArrayLightDataCache();
 
 	public BlockRenderContext() {
+
 		LightPipeline flatLightPipeline = new FlatLightPipeline(this.lightDataCache);
 
 		LightPipeline smoothLightPipeline;
@@ -49,13 +49,13 @@ public class BlockRenderContext extends AbstractBlockRenderContext {
 		random = RandomSource.create();
     }
 
-	public void render(BlockAndTintGetter blockView, BlockStateModel model, BlockState state, BlockPos pos, PoseStack matrixStack, BlockVertexConsumerProvider buffers, boolean cull, long seed, int overlay) {
+	public void render(BlockAndTintGetter blockView, BlockStateModel model, BlockState state, BlockPos pos, PoseStack matrixStack, VertexConsumer buffers, boolean cull, long seed, int overlay) {
 		Vec3 offset = state.getOffset(pos);
 		matrixStack.translate(offset.x, offset.y, offset.z);
 
 		this.blockPos = pos;
 		this.vertexConsumers = buffers;
-        this.defaultRenderLayer = ItemBlockRenderTypes.getChunkRenderType(state);
+        this.defaultRenderLayer = ChunkSectionLayer.SOLID;
 		this.matrices = matrixStack.last();
 		this.overlay = overlay;
 		this.random.setSeed(seed);
@@ -65,14 +65,14 @@ public class BlockRenderContext extends AbstractBlockRenderContext {
 		this.prepareForWorld(blockView, cull);
 		this.prepareForBlock(state, pos, state.getLightEmission() == 0);
 
-		model.emitQuads(getEmitter(), blockView, pos, state, random, this::isFaceCulled);
+		((FabricBlockStateModel)model).emitQuads(getEmitter(), blockView, pos, state, random, this::isFaceCulled);
 
 		this.vertexConsumers = null;
 	}
 
 	@Override
 	protected VertexConsumer getVertexConsumer(ChunkSectionLayer layer) {
-		return vertexConsumers.getBuffer(layer);
+		return vertexConsumers;
 	}
 
 	protected void endRenderQuad(MutableQuadViewImpl quad) {

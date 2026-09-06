@@ -82,12 +82,12 @@ public class CloudRenderer {
         }
 
         if (centerCellX != this.prevCloudX || centerCellZ != this.prevCloudZ
-                || (minecraft.options.getCloudsType() != this.prevCloudsType)
+                || (minecraft.options.getCloudStatus() != this.prevCloudsType)
                 || (this.prevCloudY != yState)
                 || this.cloudBuffer == null) {
             this.prevCloudX = centerCellX;
             this.prevCloudZ = centerCellZ;
-            this.prevCloudsType = minecraft.options.getCloudsType();
+            this.prevCloudsType = minecraft.options.getCloudStatus();
             this.prevCloudY = yState;
             this.generateClouds = true;
         }
@@ -140,7 +140,7 @@ public class CloudRenderer {
         VRenderSystem.glDepthFun(GL11.GL_LEQUAL);
         GlStateManager._enableDepthTest();
         GlStateManager._depthMask(true);
-        GlStateManager._colorMask(true, true, true, true);
+        GlStateManager._colorMask(com.mojang.blaze3d.pipeline.ColorTargetState.WRITE_ALL);
         GlStateManager._disablePolygonOffset();
         VRenderSystem.setPolygonModeGL(GL11.GL_FILL);
         VRenderSystem.setPrimitiveTopologyGL(GL11.GL_TRIANGLES);

@@ -1,8 +1,8 @@
 package net.vulkanmod.mixin.window;
 
-import com.mojang.blaze3d.TracyFrameCapture;
 import com.mojang.blaze3d.platform.*;
 import com.mojang.blaze3d.systems.RenderSystem;
+import net.neoforged.fml.loading.EarlyLoadingScreenController;
 import net.vulkanmod.Initializer;
 import net.vulkanmod.config.Config;
 import net.vulkanmod.config.Platform;
@@ -49,16 +49,10 @@ public abstract class WindowMixin {
 
     @Shadow public abstract int getHeight();
 
-    @Shadow protected abstract void updateFullscreen(boolean bl, @Nullable TracyFrameCapture tracyFrameCapture);
-
-
     @Unique private boolean wasOnFullscreen = false;
 
-    @Redirect(method = "<init>", at = @At(value = "INVOKE", target = "Lorg/lwjgl/glfw/GLFW;glfwWindowHint(II)V"))
-    private void redirect(int hint, int value) { }
-
-    @Inject(method = "<init>", at = @At(value = "INVOKE", target = "Lorg/lwjgl/glfw/GLFW;glfwCreateWindow(IILjava/lang/CharSequence;JJ)J"))
-    private void vulkanHint(WindowEventHandler windowEventHandler, ScreenManager screenManager, DisplayData displayData, String string, String string2, CallbackInfo ci) {
+    @Inject(method = "createGlfwWindow", at = @At(value = "INVOKE", target = "Lorg/lwjgl/glfw/GLFW;glfwCreateWindow(IILjava/lang/CharSequence;JJ)J"))
+    private static void vulkanHint(int width, int height, String title, long monitor, com.mojang.blaze3d.systems.GpuBackend backend, org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable<Long> cir) {
         GLFW.glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
         //Fix Gnome Client-Side Decorators
@@ -66,8 +60,82 @@ public abstract class WindowMixin {
         GLFW.glfwWindowHint(GLFW_DECORATED, (b ? GLFW_FALSE : GLFW_TRUE));
     }
 
-    @Inject(method = "<init>", at = @At(value = "RETURN"))
-    private void getHandle(WindowEventHandler windowEventHandler, ScreenManager screenManager, DisplayData displayData, String string, String string2, CallbackInfo ci) {
+    @Redirect(method = "createGlfwWindow", at = @At(value = "INVOKE", target = "Lnet/neoforged/fml/loading/EarlyLoadingScreenController;takeOverGlfwWindow()J"))
+    private static long vulkanHandoff(EarlyLoadingScreenController controller) {
+        long handle = controller.takeOverGlfwWindow();
+
+        if (GLFW.glfwGetWindowAttrib(handle, GLFW_CLIENT_API) != GLFW_NO_API) {
+            LOGGER.warn("VulkanMod: NeoForge early loading window has an OpenGL context, handing off to a fresh contextless Vulkan window.");
+
+            int[] width = new int[1];
+            int[] height = new int[1];
+            GLFW.glfwGetWindowSize(handle, width, height);
+
+            // 1. Terminate any background renderScheduler in the early window immediately
+            try {
+                java.lang.reflect.Field schedulerField = controller.getClass().getDeclaredField("renderScheduler");
+                schedulerField.setAccessible(true);
+                java.util.concurrent.ScheduledExecutorService scheduler = (java.util.concurrent.ScheduledExecutorService) schedulerField.get(controller);
+                if (scheduler != null) {
+                    scheduler.shutdownNow();
+                    scheduler.awaitTermination(200, java.util.concurrent.TimeUnit.MILLISECONDS);
+                }
+            } catch (Throwable t) {
+                LOGGER.debug("VulkanMod: Failed to shut down earlydisplay renderScheduler: {}", t.getMessage());
+            }
+
+            // 2. Release the loading renderer while its OpenGL window still exists.
+            try {
+                GLFW.glfwMakeContextCurrent(handle);
+                org.lwjgl.opengl.GL.createCapabilities();
+                java.lang.reflect.Method closeMethod = controller.getClass().getMethod("close");
+                closeMethod.invoke(controller);
+            } catch (Throwable t) {
+                LOGGER.debug("VulkanMod: Failed to close early display window: {}", t.getMessage());
+            }
+            GLFW.glfwMakeContextCurrent(0L);
+            org.lwjgl.opengl.GL.setCapabilities(null);
+            GLFW.glfwDestroyWindow(handle);
+            net.vulkanmod.compat.EarlyWindowCompat.setHandoffComplete(true);
+            net.vulkanmod.compat.EarlyWindowCompat.disableFmlEarlyWindowProvider();
+            disableEarlyWindowTick();
+
+            GLFW.glfwDefaultWindowHints();
+            GLFW.glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+            boolean decorated = !((Platform.isGnome() | Platform.isWeston() | Platform.isGeneric()) && Platform.isWayLand());
+            GLFW.glfwWindowHint(GLFW_DECORATED, (decorated ? GLFW_TRUE : GLFW_FALSE));
+            long freshWindow = GLFW.glfwCreateWindow(width[0], height[0], "", 0L, 0L);
+            if (freshWindow == 0L) {
+                throw new RuntimeException("VulkanMod: Failed to create a fresh contextless Vulkan window during NeoForge early window handoff");
+            }
+            return freshWindow;
+        }
+
+        return handle;
+    }
+
+    @Unique
+    private static void disableEarlyWindowTick() {
+        try {
+            Class<?> clazz = Class.forName("net.neoforged.fml.loading.ImmediateWindowHandler");
+            java.lang.reflect.Field providerField = clazz.getDeclaredField("provider");
+            providerField.setAccessible(true);
+            providerField.set(null, null);
+        } catch (Throwable t) {
+            LOGGER.warn("VulkanMod: Failed to neutralize NeoForge early window tick: {}", t.getMessage());
+        }
+
+        try {
+            Class<?> cml = Class.forName("net.neoforged.neoforge.client.loading.ClientModLoader");
+            java.lang.reflect.Field elsField = cml.getDeclaredField("earlyLoadingScreen");
+            elsField.setAccessible(true);
+            elsField.set(null, null);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    @Inject(method = "<init>", at = @At("RETURN"))
+    private void getHandle(CallbackInfo ci) {
         VRenderSystem.setWindow(this.handle);
     }
 
@@ -91,19 +159,6 @@ public abstract class WindowMixin {
         if (!this.fullscreen) {
             Config config = Initializer.CONFIG;
             config.windowMode = WindowMode.WINDOWED.mode;
-        }
-    }
-
-    /**
-     * @author
-     */
-    @Overwrite
-    public void updateDisplay(@Nullable TracyFrameCapture tracyFrameCapture) {
-        RenderSystem.flipFrame((Window) ((Object)this), tracyFrameCapture);
-
-        if (Options.fullscreenDirty) {
-            Options.fullscreenDirty = false;
-            this.updateFullscreen(this.vsync, tracyFrameCapture);
         }
     }
 
@@ -196,30 +251,30 @@ public abstract class WindowMixin {
     @Overwrite
     private void onFramebufferResize(long window, int width, int height) {
         if (window == this.handle) {
-            int prevWidth = this.getWidth();
-            int prevHeight = this.getHeight();
+            int prevWidth = this.framebufferWidth;
+            int prevHeight = this.framebufferHeight;
 
-            if(width > 0 && height > 0) {
-                this.framebufferWidth = width;
-                this.framebufferHeight = height;
-
-                Renderer.scheduleSwapChainUpdate();
+            if (width <= 0 || height <= 0) {
+                return;
             }
 
+            if (width == prevWidth && height == prevHeight) {
+                return;
+            }
+
+            this.framebufferWidth = width;
+            this.framebufferHeight = height;
+
+            Renderer.scheduleSwapChainUpdate();
         }
     }
 
-    /**
-     * @author
-     * @reason
-     */
     @Overwrite
     private void onResize(long window, int width, int height) {
-        this.width = width;
-        this.height = height;
-
-        if(width > 0 && height > 0)
-            Renderer.scheduleSwapChainUpdate();
+        if (window == this.handle) {
+            this.width = width;
+            this.height = height;
+        }
     }
 
 }

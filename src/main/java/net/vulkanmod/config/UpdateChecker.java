@@ -3,11 +3,9 @@ package net.vulkanmod.config;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import net.fabricmc.loader.api.Version;
-import net.fabricmc.loader.api.VersionParsingException;
-import net.fabricmc.loader.impl.util.version.VersionParser;
 import net.minecraft.SharedConstants;
 import net.vulkanmod.Initializer;
+import org.apache.maven.artifact.versioning.ComparableVersion;
 
 import java.io.IOException;
 import java.net.HttpURLConnection;
@@ -32,26 +30,31 @@ public abstract class UpdateChecker {
                 JsonArray versions = data.getAsJsonArray("versions");
                 http.disconnect();
 
-                String version = String.valueOf(versions.get(0).getAsJsonObject().get("version_number")).replace("\"", "");
+                if (versions != null && !versions.isEmpty()) {
+                    String version = String.valueOf(versions.get(0).getAsJsonObject().get("version_number")).replace("\"", "");
 
-                var currentVersion = VersionParser.parseSemantic(Initializer.getVersion());
+                    String currentVerStr = Initializer.getVersion();
+                    if (currentVerStr != null && currentVerStr.contains("-dev")) {
+                        Initializer.LOGGER.info("Pre-release version, skipping update check.");
+                        return null;
+                    }
 
-                if (currentVersion.getPrereleaseKey().isPresent()) {
-                    Initializer.LOGGER.info("Pre-release version, skipping update check.");
+                    if (currentVerStr != null) {
+                        ComparableVersion currentVersion = new ComparableVersion(currentVerStr);
+                        ComparableVersion remoteVersion = new ComparableVersion(version);
 
-                    return null;
-                }
+                        updateAvailable = currentVersion.compareTo(remoteVersion) < 0;
 
-                updateAvailable = currentVersion.compareTo(Version.parse(version)) < 0;
-
-                if (updateAvailable) {
-                    Initializer.LOGGER.info("Update available!");
+                        if (updateAvailable) {
+                            Initializer.LOGGER.info("Update available!");
+                        }
+                    }
                 }
             }
             catch (IOException e) {
                 Initializer.LOGGER.info("Error occurred, skipping update check.");
             }
-            catch (VersionParsingException e) {
+            catch (Exception e) {
                 Initializer.LOGGER.info("Unable to parse version, skipping update check.");
             }
 

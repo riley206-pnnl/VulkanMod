@@ -2,33 +2,30 @@ package net.vulkanmod.render.chunk.build.frapi.render;
 
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import it.unimi.dsi.fastutil.objects.Object2ByteLinkedOpenHashMap;
-import net.fabricmc.fabric.api.renderer.v1.Renderer;
-import net.fabricmc.fabric.api.renderer.v1.mesh.QuadAtlas;
-import net.fabricmc.fabric.api.renderer.v1.mesh.QuadEmitter;
-import net.fabricmc.fabric.api.renderer.v1.model.ModelHelper;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.color.block.BlockColor;
 import net.minecraft.client.color.block.BlockColors;
-import net.minecraft.client.renderer.ItemBlockRenderTypes;
-import net.minecraft.client.renderer.block.model.BlockModelPart;
-import net.minecraft.client.renderer.block.model.BlockStateModel;
+import net.minecraft.client.color.block.BlockTintSource;
+import java.util.ArrayList;
+import net.minecraft.client.renderer.block.dispatch.BlockStateModelPart;
+import net.minecraft.client.renderer.block.dispatch.BlockStateModel;
 import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
 import net.minecraft.util.RandomSource;
-import net.minecraft.world.level.BlockAndTintGetter;
+import net.minecraft.client.renderer.block.BlockAndTintGetter;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.phys.shapes.BooleanOp;
 import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
-import net.vulkanmod.interfaces.color.BlockColorsExtended;
-import net.vulkanmod.render.chunk.build.color.BlockColorRegistry;
 import net.vulkanmod.render.chunk.build.frapi.VulkanModRenderer;
+import net.vulkanmod.render.chunk.build.frapi.helper.fabric.interfaces.FabricBlockModelPart;
+import net.vulkanmod.render.chunk.build.frapi.helper.fabric.helper.ModelHelper;
+import net.vulkanmod.render.chunk.build.frapi.helper.fabric.interfaces.QuadEmitter;
 import net.vulkanmod.render.chunk.build.light.LightPipeline;
 import net.vulkanmod.render.chunk.build.light.data.QuadLightData;
 import org.jetbrains.annotations.Nullable;
 import net.vulkanmod.render.chunk.build.frapi.helper.ColorHelper;
 import net.vulkanmod.render.chunk.build.frapi.mesh.EncodingFormat;
 import net.vulkanmod.render.chunk.build.frapi.mesh.MutableQuadViewImpl;
-import net.minecraft.client.renderer.LightTexture;
+import net.minecraft.util.LightCoordsUtil;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.block.state.BlockState;
@@ -38,9 +35,9 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 public abstract class AbstractBlockRenderContext extends AbstractRenderContext {
-	private static final Renderer RENDERER = VulkanModRenderer.INSTANCE;
+	private static final VulkanModRenderer RENDERER = VulkanModRenderer.INSTANCE;
 
-	protected final BlockColorRegistry blockColorRegistry;
+	protected final BlockColors blockColors;
 
 	private final MutableQuadViewImpl editorQuad = new MutableQuadViewImpl() {
 		{
@@ -53,6 +50,15 @@ public abstract class AbstractBlockRenderContext extends AbstractRenderContext {
 			renderQuad(this);
 		}
 
+//		@Override
+//		public void emitBlockQuads(QuadEmitter emitter, BakedModel model, BlockState state,
+//								   Supplier<RandomSource> randomSupplier, Predicate<@Nullable Direction> cullTest) {
+//			if (this.hasTransform) {
+//				super.emitBlockQuads(emitter, model, state, randomSupplier, cullTest);
+//			} else {
+//				AbstractBlockRenderContext.this.emitVanillaBlockQuads(model, state, randomSupplier, cullTest);
+//			}
+//		}
 	};
 
 	protected BlockState blockState;
@@ -82,9 +88,7 @@ public abstract class AbstractBlockRenderContext extends AbstractRenderContext {
 
 	protected AbstractBlockRenderContext() {
 		this.occlusionCache.defaultReturnValue((byte) 127);
-
-		BlockColors blockColors = Minecraft.getInstance().getBlockColors();
-		this.blockColorRegistry = BlockColorsExtended.from(blockColors).getColorResolverMap();
+		this.blockColors = Minecraft.getInstance().getBlockColors();
 	}
 
 	protected void setupLightPipelines(LightPipeline flatLightPipeline, LightPipeline smoothLightPipeline) {
@@ -100,9 +104,9 @@ public abstract class AbstractBlockRenderContext extends AbstractRenderContext {
 	public void prepareForBlock(BlockState blockState, BlockPos blockPos, boolean modelAo) {
 		this.blockPos = blockPos;
 		this.blockState = blockState;
-		this.defaultLayer = ItemBlockRenderTypes.getChunkRenderType(blockState);
+		this.defaultLayer = ChunkSectionLayer.SOLID;
 
-		this.useAO = Minecraft.useAmbientOcclusion();
+		this.useAO = Minecraft.getInstance().options.ambientOcclusion().get();
 		this.defaultAO = this.useAO && modelAo && blockState.getLightEmission() == 0;
 
 		this.cullCompletionFlags = 0;
@@ -215,9 +219,9 @@ public abstract class AbstractBlockRenderContext extends AbstractRenderContext {
 	}
 
 	private int getBlockColor(BlockAndTintGetter region, int colorIndex) {
-		BlockColor blockColor = this.blockColorRegistry.getBlockColor(this.blockState.getBlock());
+		BlockTintSource tintSource = this.blockColors.getTintSource(this.blockState, colorIndex);
 
-		int color = blockColor != null ? blockColor.getColor(blockState, region, blockPos, colorIndex) : -1;
+		int color = tintSource != null ? tintSource.colorInWorld(blockState, region, blockPos) : -1;
 		return 0xFF000000 | color;
 	}
 
@@ -231,7 +235,7 @@ public abstract class AbstractBlockRenderContext extends AbstractRenderContext {
 			for (int i = 0; i < 4; i++) {
 				quad.color(i, ColorHelper.multiplyRGB(quad.color(i), data.br[i]));
 //				quad.lightmap(i, LightTexture.FULL_BRIGHT);
-				data.lm[i] = LightTexture.FULL_BRIGHT;
+				data.lm[i] = LightCoordsUtil.FULL_BRIGHT;
 			}
 		} else {
 			for (int i = 0; i < 4; i++) {
@@ -258,11 +262,12 @@ public abstract class AbstractBlockRenderContext extends AbstractRenderContext {
 				continue;
 			}
 
-			final List<BlockModelPart> parts = ((BlockStateModel) this).collectParts(random);
+			final List<BlockStateModelPart> parts = new ArrayList<>();
+			model.collectParts(this.random, parts);
 			final int partCount = parts.size();
 
 			for (int j = 0; j < partCount; j++) {
-				parts.get(j).emitQuads(quad, cullTest);
+				((FabricBlockModelPart)parts.get(j)).emitQuads(quad, cullTest);
 			}
 		}
 

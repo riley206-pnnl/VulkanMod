@@ -17,7 +17,7 @@ import net.minecraft.client.renderer.culling.Frustum;
 import net.minecraft.client.renderer.entity.EntityRenderDispatcher;
 import net.minecraft.client.renderer.feature.FeatureRenderDispatcher;
 import net.minecraft.client.renderer.feature.ModelFeatureRenderer;
-import net.minecraft.client.renderer.state.LevelRenderState;
+import net.minecraft.client.renderer.state.level.LevelRenderState;
 import net.minecraft.client.renderer.texture.AbstractTexture;
 import net.minecraft.client.renderer.texture.TextureAtlas;
 import net.minecraft.client.renderer.texture.TextureManager;
@@ -28,6 +28,7 @@ import net.minecraft.util.Mth;
 import net.minecraft.util.profiling.ProfilerFiller;
 import net.minecraft.util.profiling.Zone;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.Vec3;
 import net.vulkanmod.Initializer;
@@ -341,7 +342,7 @@ public class WorldRenderer {
         GlStateManager._enableDepthTest();
         GlStateManager._depthMask(true);
 
-        GlStateManager._colorMask(true, true, true, true);
+        GlStateManager._colorMask(com.mojang.blaze3d.pipeline.ColorTargetState.WRITE_ALL);
         GlStateManager._disablePolygonOffset();
         VRenderSystem.setPolygonModeGL(GL11.GL_FILL);
 
@@ -368,7 +369,7 @@ public class WorldRenderer {
         texture.getVulkanImage().setSampler(this.terrainSampler);
 
         VRenderSystem.setShaderTexture(0, texView);
-        VRenderSystem.setShaderTexture(2, Minecraft.getInstance().gameRenderer.lightTexture().getTextureView());
+        VRenderSystem.setShaderTexture(2, Minecraft.getInstance().gameRenderer.lightmap());
 
         VTextureSelector.bindShaderTextures(pipeline);
 
@@ -390,16 +391,19 @@ public class WorldRenderer {
         sectionData.setUseGlobalBuffer(false);
 
         int currentFrame = Renderer.getCurrentFrame();
-        Set<TerrainRenderType> allowedRenderTypes = Initializer.CONFIG.uniqueOpaqueLayer ? TerrainRenderType.COMPACT_RENDER_TYPES : TerrainRenderType.SEMI_COMPACT_RENDER_TYPES;
+        Set<TerrainRenderType> allowedRenderTypes = TerrainRenderType.SEMI_COMPACT_RENDER_TYPES;
         if (allowedRenderTypes.contains(renderType)) {
             renderType.setCutoutUniform();
 
+            int areaCount = 0, drawnCount = 0, noBufferCount = 0, emptyQueueCount = 0;
             for (Iterator<ChunkArea> iterator = this.sectionGraph.getChunkAreaQueue().iterator(isTranslucent); iterator.hasNext(); ) {
                 ChunkArea chunkArea = iterator.next();
                 var queue = chunkArea.sectionQueue;
                 DrawBuffers drawBuffers = chunkArea.drawBuffers;
+                areaCount++;
 
                 if (drawBuffers.getAreaBuffer(renderType) != null && queue.size() > 0) {
+                    drawnCount++;
 
                     drawBuffers.bindBuffers(Renderer.getCommandBuffer(), pipeline, renderType,
                                             sectionData,
@@ -414,7 +418,13 @@ public class WorldRenderer {
                     else {
                         drawBuffers.buildDrawBatchesDirect(cameraPos, queue, renderType);
                     }
+                } else {
+                    if (drawBuffers.getAreaBuffer(renderType) == null) noBufferCount++;
+                    if (queue.size() == 0) emptyQueueCount++;
                 }
+            }
+            if (renderType == TerrainRenderType.SOLID && areaCount > 0) {
+                Initializer.LOGGER.info("VulkanMod DRAW: renderType={}, areas={}, drawn={}, noBuffer={}, emptyQueue={}", renderType, areaCount, drawnCount, noBufferCount, emptyQueueCount);
             }
         }
 
@@ -546,6 +556,24 @@ public class WorldRenderer {
         this.sectionGrid.setDirty(x, y, z, flag);
 
         this.renderRegionCache.remove(x, z);
+    }
+
+    public void onChunkReadyToRender(ChunkPos chunkPos) {
+        if (this.sectionGrid != null) {
+            for (int x1 = chunkPos.x() - 1; x1 <= chunkPos.x() + 1; ++x1) {
+                for (int z1 = chunkPos.z() - 1; z1 <= chunkPos.z() + 1; ++z1) {
+                    if (this.renderRegionCache != null) {
+                        this.renderRegionCache.remove(x1, z1);
+                    }
+                    for (RenderSection section : this.sectionGrid.getRenderSectionsAt(x1, z1)) {
+                        if (section != null && (section.xOffset >> 4) == x1 && (section.zOffset >> 4) == z1) {
+                            section.setDirty(false);
+                        }
+                    }
+                }
+            }
+            this.graphNeedsUpdate = true;
+        }
     }
 
     public SectionGrid getSectionGrid() {

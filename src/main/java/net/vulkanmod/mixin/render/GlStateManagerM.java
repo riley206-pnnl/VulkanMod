@@ -188,9 +188,9 @@ public class GlStateManagerM {
      * @author
      */
     @Overwrite(remap = false)
-    public static void _colorMask(boolean red, boolean green, boolean blue, boolean alpha) {
+    public static void _colorMask(@com.mojang.blaze3d.pipeline.ColorTargetState.WriteMask int writeMask) {
         RenderSystem.assertOnRenderThread();
-        VRenderSystem.colorMask(red, green, blue, alpha);
+        VRenderSystem.colorMask((writeMask & 1) != 0, (writeMask & 2) != 0, (writeMask & 4) != 0, (writeMask & 8) != 0);
     }
 
     /**

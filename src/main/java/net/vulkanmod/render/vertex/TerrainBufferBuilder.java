@@ -3,6 +3,7 @@ package net.vulkanmod.render.vertex;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.vulkanmod.Initializer;
 import net.vulkanmod.render.vertex.format.I32_SNorm;
+import net.vulkanmod.vulkan.util.ColorUtil;
 import org.apache.logging.log4j.Logger;
 import org.lwjgl.system.MemoryUtil;
 
@@ -94,6 +95,7 @@ public class TerrainBufferBuilder implements VertexConsumer {
 
 	@Override
 	public VertexConsumer addVertex(float x, float y, float z) {
+        this.ensureCapacity();
 		this.elementPtr = this.bufferPtr + this.nextElementByte;
 		this.endVertex();
 
@@ -101,6 +103,14 @@ public class TerrainBufferBuilder implements VertexConsumer {
 
 		return this;
 	}
+
+    @Override
+    public void addVertex(float x, float y, float z, int color, float u, float v, int overlayCoords, int lightCoords, float nx, float ny, float nz) {
+        this.ensureCapacity();
+        int rgbaColor = ColorUtil.ARGB.toRGBA(color);
+        int packedNormal = I32_SNorm.packNormal(nx, ny, nz);
+        this.vertex(x, y, z, rgbaColor, u, v, lightCoords, packedNormal);
+    }
 
 	@Override
 	public VertexConsumer setColor(int r, int g, int b, int a) {

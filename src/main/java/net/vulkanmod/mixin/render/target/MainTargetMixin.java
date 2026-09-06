@@ -60,4 +60,9 @@ public class MainTargetMixin extends RenderTarget {
     public GpuTexture getDepthTexture() {
         return Renderer.getInstance().getMainPass().getDepthAttachment();
     }
+
+    @Override
+    public GpuTextureView getDepthTextureView() {
+        return Renderer.getInstance().getMainPass().getDepthAttachmentView();
+    }
 }

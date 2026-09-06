@@ -3,14 +3,11 @@ package net.vulkanmod.render.engine;
 import com.mojang.blaze3d.textures.AddressMode;
 import com.mojang.blaze3d.textures.FilterMode;
 import com.mojang.blaze3d.textures.GpuSampler;
-import net.fabricmc.api.EnvType;
-import net.fabricmc.api.Environment;
 import net.vulkanmod.vulkan.texture.SamplerManager;
 import org.lwjgl.vulkan.VK10;
 
 import java.util.OptionalDouble;
 
-@Environment(EnvType.CLIENT)
 public class VkSampler extends GpuSampler {
     private final AddressMode addressModeU;
     private final AddressMode addressModeV;

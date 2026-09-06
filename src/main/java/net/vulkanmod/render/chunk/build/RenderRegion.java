@@ -4,7 +4,9 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.SectionPos;
-import net.minecraft.world.level.BlockAndTintGetter;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.renderer.block.BlockAndTintGetter;
+import net.minecraft.world.level.CardinalLighting;
 import net.minecraft.world.level.ColorResolver;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.LightLayer;
@@ -141,7 +143,7 @@ public class RenderRegion implements BlockAndTintGetter {
     }
 
     public float getShade(Direction direction, boolean bl) {
-        return this.level.getShade(direction, bl);
+        return bl ? cardinalLighting().byFace(direction) : 1.0F;
     }
 
     public LevelLightEngine getLightEngine() {
@@ -242,5 +244,13 @@ public class RenderRegion implements BlockAndTintGetter {
         }
 
         return blockState == null ? Blocks.AIR.defaultBlockState() : blockState;
+    }
+
+    @Override
+    public CardinalLighting cardinalLighting() {
+        if (this.level instanceof ClientLevel clientLevel) {
+            return clientLevel.cardinalLighting();
+        }
+        return CardinalLighting.DEFAULT;
     }
 }

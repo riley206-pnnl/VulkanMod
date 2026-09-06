@@ -109,8 +109,8 @@ public class RenderTypeM implements ExtendedRenderType {
 //            renderPass.setIndexBuffer(gpuBuffer2, indexType);
 //            renderPass.drawIndexed(0, 0, meshData.drawState().indexCount(), 1);
 
-            VkCommandEncoder commandEncoder = (VkCommandEncoder) RenderSystem.getDevice().createCommandEncoder();
-            commandEncoder.trySetup((VkRenderPass) renderPass);
+            VkCommandEncoder commandEncoder = (VkCommandEncoder) (Object) RenderSystem.getDevice().backend.createCommandEncoder();
+            commandEncoder.trySetup((VkRenderPass) (Object) renderPass.backend);
 
             Renderer.getDrawer().draw(meshData.vertexBuffer(), meshData.indexBuffer(), meshData.drawState().mode(), meshData.drawState().format(), meshData.drawState().vertexCount());
         }

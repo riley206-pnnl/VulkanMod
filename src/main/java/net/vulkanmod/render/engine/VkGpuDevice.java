@@ -9,15 +9,15 @@ import com.mojang.blaze3d.shaders.ShaderSource;
 import com.mojang.blaze3d.shaders.ShaderType;
 import com.mojang.blaze3d.systems.CommandEncoder;
 import com.mojang.blaze3d.systems.GpuDevice;
+import com.mojang.blaze3d.systems.GpuDeviceBackend;
 import com.mojang.blaze3d.textures.*;
 import com.mojang.logging.LogUtils;
-import net.fabricmc.api.EnvType;
-import net.fabricmc.api.Environment;
 import net.minecraft.client.renderer.ShaderDefines;
 import net.minecraft.resources.Identifier;
 import net.vulkanmod.gl.VkGlTexture;
 import net.vulkanmod.interfaces.shader.ExtendedRenderPipeline;
 import net.vulkanmod.render.shader.ShaderLoadUtil;
+import net.vulkanmod.vulkan.Renderer;
 import net.vulkanmod.vulkan.VRenderSystem;
 import net.vulkanmod.vulkan.Vulkan;
 import net.vulkanmod.vulkan.device.DeviceManager;
@@ -39,7 +39,13 @@ import java.util.function.BiFunction;
 import java.util.function.Supplier;
 
 @SuppressWarnings("NullableProblems")
-public class VkGpuDevice implements GpuDevice {
+public class VkGpuDevice implements GpuDeviceBackend {
+    private static VkGpuDevice INSTANCE;
+
+    public static VkGpuDevice getInstance() {
+        return INSTANCE;
+    }
+
     private static final Logger LOGGER = LogUtils.getLogger();
 
     private static final ShaderDefines GLOBAL_DEFINES = ShaderDefines.builder()
@@ -61,6 +67,7 @@ public class VkGpuDevice implements GpuDevice {
     private final Map<ShaderCompilationKey, String> shaderSrcCache = new HashMap<>();
 
     public VkGpuDevice(long l, int i, boolean bl, ShaderSource shaderSource, boolean bl2) {
+        INSTANCE = this;
         this.debugLabels = VkDebugLabel.create(bl2, this.enabledExtensions);
         this.maxSupportedTextureSize = VRenderSystem.maxSupportedTextureSize();
         this.uniformOffsetAlignment = (int) DeviceManager.deviceProperties().limits().minUniformBufferOffsetAlignment();
@@ -74,7 +81,7 @@ public class VkGpuDevice implements GpuDevice {
     }
 
     @Override
-    public CommandEncoder createCommandEncoder() {
+    public VkCommandEncoder createCommandEncoder() {
         return this.encoder;
     }
 
@@ -128,7 +135,14 @@ public class VkGpuDevice implements GpuDevice {
         VkGlTexture glTexture = VkGlTexture.getTexture(id);
         glTexture.setVulkanImage(image);
         TextureFormat textureFormat = VkGpuTexture.textureFormat(image.format);
-        VkGpuTexture gpuTexture = new VkGpuTexture(0, image.name, textureFormat, image.width, image.height, 1, image.mipLevels, id, glTexture);
+        int usage = 0;
+        if ((image.usage & VK10.VK_IMAGE_USAGE_TRANSFER_DST_BIT) != 0) usage |= GpuTexture.USAGE_COPY_DST;
+        if ((image.usage & VK10.VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0) usage |= GpuTexture.USAGE_COPY_SRC;
+        if ((image.usage & VK10.VK_IMAGE_USAGE_SAMPLED_BIT) != 0) usage |= GpuTexture.USAGE_TEXTURE_BINDING;
+        if ((image.usage & (VK10.VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK10.VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)) != 0) {
+            usage |= GpuTexture.USAGE_RENDER_ATTACHMENT;
+        }
+        VkGpuTexture gpuTexture = new VkGpuTexture(usage, image.name, textureFormat, image.width, image.height, image.arrayLayers, image.mipLevels, id, glTexture);
         this.debugLabels.applyLabel(gpuTexture);
         return gpuTexture;
     }
@@ -273,6 +287,21 @@ public class VkGpuDevice implements GpuDevice {
         this.clearPipelineCache();
     }
 
+    @Override
+    public void setVsync(boolean enabled) {
+        Vulkan.setVsync(enabled);
+    }
+
+    @Override
+    public void presentFrame() {
+        Renderer.getInstance().endFrame();
+    }
+
+    @Override
+    public boolean isZZeroToOne() {
+        return true;
+    }
+
     protected GlShaderModule getOrCompileShader(
             Identifier resourceLocation, ShaderType shaderType, ShaderDefines shaderDefines, BiFunction<Identifier, ShaderType, String> biFunction
     ) {
@@ -410,7 +439,6 @@ public class VkGpuDevice implements GpuDevice {
         extPipeline.setPipeline(pipeline);
     }
 
-    @Environment(EnvType.CLIENT)
     record ShaderCompilationKey(Identifier id, ShaderType type, ShaderDefines defines) {
 
         public String toString() {

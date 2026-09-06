@@ -16,24 +16,38 @@
 
 package net.vulkanmod.render.chunk.build.frapi.mesh;
 
-import net.fabricmc.fabric.api.renderer.v1.mesh.QuadAtlas;
-import net.fabricmc.fabric.api.renderer.v1.mesh.ShadeMode;
-import net.fabricmc.fabric.api.util.TriState;
+import static net.vulkanmod.render.chunk.build.frapi.mesh.EncodingFormat.HEADER_BITS;
+import static net.vulkanmod.render.chunk.build.frapi.mesh.EncodingFormat.HEADER_TINT_INDEX;
+import static net.vulkanmod.render.chunk.build.frapi.mesh.EncodingFormat.HEADER_FACE_NORMAL;
+import static net.vulkanmod.render.chunk.build.frapi.mesh.EncodingFormat.HEADER_STRIDE;
+import static net.vulkanmod.render.chunk.build.frapi.mesh.EncodingFormat.HEADER_TAG;
+import static net.vulkanmod.render.chunk.build.frapi.mesh.EncodingFormat.QUAD_STRIDE;
+import static net.vulkanmod.render.chunk.build.frapi.mesh.EncodingFormat.VERTEX_COLOR;
+import static net.vulkanmod.render.chunk.build.frapi.mesh.EncodingFormat.VERTEX_LIGHTMAP;
+import static net.vulkanmod.render.chunk.build.frapi.mesh.EncodingFormat.VERTEX_NORMAL;
+import static net.vulkanmod.render.chunk.build.frapi.mesh.EncodingFormat.VERTEX_STRIDE;
+import static net.vulkanmod.render.chunk.build.frapi.mesh.EncodingFormat.VERTEX_U;
+import static net.vulkanmod.render.chunk.build.frapi.mesh.EncodingFormat.VERTEX_V;
+import static net.vulkanmod.render.chunk.build.frapi.mesh.EncodingFormat.VERTEX_X;
+import static net.vulkanmod.render.chunk.build.frapi.mesh.EncodingFormat.VERTEX_Y;
+import static net.vulkanmod.render.chunk.build.frapi.mesh.EncodingFormat.VERTEX_Z;
+
+import net.vulkanmod.render.chunk.build.frapi.helper.fabric.ShadeMode;
+import net.minecraft.util.TriState;
 import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
 import net.minecraft.client.renderer.item.ItemStackRenderState;
 import net.vulkanmod.render.chunk.cull.QuadFacing;
 import net.vulkanmod.render.model.quad.ModelQuadFlags;
 import net.vulkanmod.render.model.quad.ModelQuadView;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.joml.Vector2f;
 import org.joml.Vector3f;
-import net.fabricmc.fabric.api.renderer.v1.mesh.QuadView;
+import net.vulkanmod.render.chunk.build.frapi.helper.fabric.interfaces.QuadView;
+import net.vulkanmod.render.chunk.build.frapi.helper.ColorHelper;
 import net.vulkanmod.render.chunk.build.frapi.helper.GeometryHelper;
 import net.vulkanmod.render.chunk.build.frapi.helper.NormalHelper;
 import net.minecraft.core.Direction;
-import org.joml.Vector3fc;
-
-import static net.vulkanmod.render.chunk.build.frapi.mesh.EncodingFormat.*;
 
 /**
  * Base class for all quads / quad makers. Handles the ugly bits
@@ -58,14 +72,14 @@ public class QuadViewImpl implements QuadView, ModelQuadView {
 	 * Decodes necessary state from the backing data array.
 	 * The encoded data must contain valid computed geometry.
 	 */
-	public final void load() {
+	public void load() {
 		isGeometryInvalid = false;
 		nominalFace = lightFace();
 		NormalHelper.unpackNormal(packedFaceNormal(), faceNormal);
 		facing = QuadFacing.fromNormal(faceNormal);
 	}
 
-	protected final void computeGeometry() {
+	protected void computeGeometry() {
 		if (isGeometryInvalid) {
 			isGeometryInvalid = false;
 
@@ -83,34 +97,33 @@ public class QuadViewImpl implements QuadView, ModelQuadView {
 		}
 	}
 
-	/** gets flags used for lighting - lazily computed via {@link GeometryHelper#computeShapeFlags(QuadView)}. */
-	public final int geometryFlags() {
+	public int geometryFlags() {
 		computeGeometry();
 		return EncodingFormat.geometryFlags(data[baseIndex + HEADER_BITS]);
 	}
 
 	@Override
-	public final float x(int vertexIndex) {
+	public float x(int vertexIndex) {
 		return Float.intBitsToFloat(data[baseIndex + vertexIndex * VERTEX_STRIDE + VERTEX_X]);
 	}
 
 	@Override
-	public final float y(int vertexIndex) {
+	public float y(int vertexIndex) {
 		return Float.intBitsToFloat(data[baseIndex + vertexIndex * VERTEX_STRIDE + VERTEX_Y]);
 	}
 
 	@Override
-	public final float z(int vertexIndex) {
+	public float z(int vertexIndex) {
 		return Float.intBitsToFloat(data[baseIndex + vertexIndex * VERTEX_STRIDE + VERTEX_Z]);
 	}
 
 	@Override
-	public final float posByIndex(int vertexIndex, int coordinateIndex) {
+	public float posByIndex(int vertexIndex, int coordinateIndex) {
 		return Float.intBitsToFloat(data[baseIndex + vertexIndex * VERTEX_STRIDE + VERTEX_X + coordinateIndex]);
 	}
 
 	@Override
-	public final Vector3f copyPos(int vertexIndex, @Nullable Vector3f target) {
+	public Vector3f copyPos(int vertexIndex, @Nullable Vector3f target) {
 		if (target == null) {
 			target = new Vector3f();
 		}
@@ -121,22 +134,22 @@ public class QuadViewImpl implements QuadView, ModelQuadView {
 	}
 
 	@Override
-	public final int color(int vertexIndex) {
+	public int color(int vertexIndex) {
 		return data[baseIndex + vertexIndex * VERTEX_STRIDE + VERTEX_COLOR];
 	}
 
 	@Override
-	public final float u(int vertexIndex) {
+	public float u(int vertexIndex) {
 		return Float.intBitsToFloat(data[baseIndex + vertexIndex * VERTEX_STRIDE + VERTEX_U]);
 	}
 
 	@Override
-	public final float v(int vertexIndex) {
+	public float v(int vertexIndex) {
 		return Float.intBitsToFloat(data[baseIndex + vertexIndex * VERTEX_STRIDE + VERTEX_V]);
 	}
 
 	@Override
-	public final Vector2f copyUv(int vertexIndex, @Nullable Vector2f target) {
+	public Vector2f copyUv(int vertexIndex, @Nullable Vector2f target) {
 		if (target == null) {
 			target = new Vector2f();
 		}
@@ -147,7 +160,7 @@ public class QuadViewImpl implements QuadView, ModelQuadView {
 	}
 
 	@Override
-	public final int lightmap(int vertexIndex) {
+	public int lightmap(int vertexIndex) {
 		return data[baseIndex + vertexIndex * VERTEX_STRIDE + VERTEX_LIGHTMAP];
 	}
 
@@ -205,18 +218,8 @@ public class QuadViewImpl implements QuadView, ModelQuadView {
 		}
 	}
 
-	public final int packedFaceNormal() {
-		computeGeometry();
-		return data[baseIndex + HEADER_FACE_NORMAL];
-	}
-
 	@Override
-	public final Vector3fc faceNormal() {
-		computeGeometry();
-		return faceNormal;
-	}
-
-	@Override
+	@NotNull
 	public final Direction lightFace() {
 		computeGeometry();
 		return EncodingFormat.lightFace(data[baseIndex + HEADER_BITS]);
@@ -226,6 +229,17 @@ public class QuadViewImpl implements QuadView, ModelQuadView {
 	@Nullable
 	public final Direction nominalFace() {
 		return nominalFace;
+	}
+
+	public final int packedFaceNormal() {
+		computeGeometry();
+		return data[baseIndex + HEADER_FACE_NORMAL];
+	}
+
+	@Override
+	public final Vector3f faceNormal() {
+		computeGeometry();
+		return faceNormal;
 	}
 
 	@Override
@@ -256,18 +270,14 @@ public class QuadViewImpl implements QuadView, ModelQuadView {
 	}
 
 	@Override
-	public ItemStackRenderState.@Nullable FoilType glint() {
+	@Nullable
+	public ItemStackRenderState.FoilType glint() {
 		return EncodingFormat.glint(data[baseIndex + HEADER_BITS]);
 	}
 
 	@Override
 	public ShadeMode shadeMode() {
 		return EncodingFormat.shadeMode(data[baseIndex + HEADER_BITS]);
-	}
-
-	@Override
-	public QuadAtlas atlas() {
-		return EncodingFormat.quadAtlas(data[baseIndex + HEADER_BITS]);
 	}
 
 	@Override
@@ -278,6 +288,18 @@ public class QuadViewImpl implements QuadView, ModelQuadView {
 	@Override
 	public final int tag() {
 		return data[baseIndex + HEADER_TAG];
+	}
+
+	@Override
+	public final void toVanilla(int[] target, int targetIndex) {
+		System.arraycopy(data, baseIndex + HEADER_STRIDE, target, targetIndex, QUAD_STRIDE);
+
+		int colorIndex = targetIndex + VERTEX_COLOR - HEADER_STRIDE;
+
+		for (int i = 0; i < 4; i++) {
+			target[colorIndex] = ColorHelper.toVanillaColor(target[colorIndex]);
+			colorIndex += VANILLA_VERTEX_STRIDE;
+		}
 	}
 
 	@Override

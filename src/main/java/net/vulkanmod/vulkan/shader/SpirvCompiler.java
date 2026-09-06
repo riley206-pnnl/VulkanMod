@@ -1,7 +1,6 @@
 package net.vulkanmod.vulkan.shader;
 
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
-import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.NativeResource;
 import org.lwjgl.util.shaderc.Shaderc;
 import org.lwjgl.util.shaderc.ShadercIncludeResolveI;
@@ -10,13 +9,7 @@ import org.lwjgl.util.shaderc.ShadercIncludeResultReleaseI;
 import org.lwjgl.vulkan.VK12;
 
 import java.io.IOException;
-import java.net.URI;
-import java.net.URISyntaxException;
-import java.net.URL;
 import java.nio.ByteBuffer;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 
 import static org.lwjgl.system.MemoryUtil.NULL;
 import static org.lwjgl.system.MemoryUtil.memASCII;
@@ -70,10 +63,7 @@ public class SpirvCompiler {
     }
 
     public static void addIncludePath(String path) {
-        URL url = SpirvCompiler.class.getResource(path);
-
-        if (url != null)
-            includePaths.add(url.toExternalForm());
+        includePaths.add(path.endsWith("/") ? path : path + "/");
     }
 
     public static SPIRV compileShader(String filename, String source, ShaderKind shaderKind) {
@@ -110,43 +100,43 @@ public class SpirvCompiler {
 
     private static class ShaderIncluder implements ShadercIncludeResolveI {
 
-        private static final int MAX_PATH_LENGTH = 4096; //Maximum Linux/Unix Path Length
 
         @Override
         public long invoke(long user_data, long requested_source, int type, long requesting_source, long include_depth) {
             var requesting = memASCII(requesting_source);
             var requested = memASCII(requested_source);
 
-            try (MemoryStack stack = MemoryStack.stackPush()) {
-                Path path;
-
+            try {
                 for (String includePath : includePaths) {
-                    path = Paths.get(new URI(String.format("%s%s", includePath, requested)));
-
-                    if (Files.exists(path)) {
-                        byte[] bytes = Files.readAllBytes(path);
-
-                        return ShadercIncludeResult.malloc(stack)
-                                                   .source_name(stack.ASCII(requested))
-                                                   .content(stack.bytes(bytes))
-                                                   .user_data(user_data).address();
+                    try (var stream = SpirvCompiler.class.getResourceAsStream(includePath + requested)) {
+                        if (stream != null) {
+                            return includeResult(requested, new String(stream.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8), user_data);
+                        }
                     }
                 }
-            } catch (IOException | URISyntaxException e) {
-                throw new RuntimeException(e);
+            } catch (IOException e) {
+                return includeResult("", e.toString(), user_data);
             }
-
-            throw new RuntimeException(String.format("%s: Unable to find %s in include paths", requesting, requested));
+            // Report failure to shaderc; exceptions must not escape a native callback.
+            return includeResult("", requesting + ": Unable to find " + requested + " in include paths", user_data);
         }
     }
 
-    //TODO: Don't actually need the Releaser at all, (MemoryStack frees this for us)
-    //But ShaderC won't let us create the Includer without a corresponding Releaser, (so we need it anyway)
-    private static class ShaderReleaser implements ShadercIncludeResultReleaseI {
+    private static long includeResult(String name, String content, long userData) {
+        // The buffers must remain alive until shaderc calls the release callback.
+        return ShadercIncludeResult.calloc()
+                .source_name(org.lwjgl.system.MemoryUtil.memUTF8(name, false))
+                .content(org.lwjgl.system.MemoryUtil.memUTF8(content, false))
+                .user_data(userData).address();
+    }
 
+    private static class ShaderReleaser implements ShadercIncludeResultReleaseI {
         @Override
         public void invoke(long user_data, long include_result) {
-            //TODO:Maybe dump Shader Compiled Binaries here to a .Misc Diretcory to allow easy caching.recompilation...
+            ShadercIncludeResult result = ShadercIncludeResult.create(include_result);
+            org.lwjgl.system.MemoryUtil.memFree(result.source_name());
+            org.lwjgl.system.MemoryUtil.memFree(result.content());
+            result.free();
         }
     }
 

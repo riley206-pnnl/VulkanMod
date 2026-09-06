@@ -190,19 +190,32 @@ public class SectionGraph {
                 this.rebuildQueue.add(renderSection);
             }
 
-            byte dirs = (byte) (renderSection.getVisibilityDirs() & renderSection.getDirections());
+            // Uncompiled sections have visibility=0 which would block BFS traversal.
+            // Treat them as fully transparent so the graph can reach sections behind them.
+            byte dirs;
+            if (renderSection.getVisibility() == 0) {
+                dirs = renderSection.getDirections();
+            } else {
+                dirs = (byte) (renderSection.getVisibilityDirs() & renderSection.getDirections());
+            }
 
             visitAdjacentNodes(renderSection, dirs);
         }
     }
 
     private void scheduleRebuilds() {
+        int scheduled = 0;
         for (int i = 0; i < this.rebuildQueue.size(); i++) {
             RenderSection section = this.rebuildQueue.get(i);
 
             var cameraPos = WorldRenderer.getCameraPos();
-            section.rebuildChunkAsync(this.taskDispatcher, this.renderRegionCache, cameraPos);
-            section.setNotDirty();
+            if (section.rebuildChunkAsync(this.taskDispatcher, this.renderRegionCache, cameraPos)) {
+                section.setNotDirty();
+                scheduled++;
+            }
+        }
+        if (this.rebuildQueue.size() > 0) {
+            Initializer.LOGGER.info("VulkanMod scheduleRebuilds: queue={}, scheduled={}", this.rebuildQueue.size(), scheduled);
         }
         this.rebuildQueue.clear();
     }

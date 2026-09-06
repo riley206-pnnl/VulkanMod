@@ -21,9 +21,8 @@ public abstract class DebugEntryMemoryM {
 
     @Shadow @Final private static Identifier GROUP;
 
-    @Shadow
-    protected static long bytesToMegabytes(long l) {
-        return 0;
+    private static long bytesToMegabytes(long l) {
+        return l / 1024L / 1024L;
     }
 
     // TODO

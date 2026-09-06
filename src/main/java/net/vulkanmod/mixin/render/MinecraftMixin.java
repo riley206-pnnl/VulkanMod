@@ -21,8 +21,12 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(Minecraft.class)
 public class MinecraftMixin {
 
-    @Shadow public boolean noRender;
     @Shadow @Final public Options options;
+
+    @org.spongepowered.asm.mixin.injection.ModifyVariable(method = "<init>", at = @At(value = "STORE", ordinal = 0))
+    private com.mojang.blaze3d.systems.GpuBackend[] supplyVulkanBackend(com.mojang.blaze3d.systems.GpuBackend[] backends) {
+        return new com.mojang.blaze3d.systems.GpuBackend[]{ new net.vulkanmod.render.engine.VkGpuBackend() };
+    }
 
     @Inject(method = "<init>", at = @At(value = "RETURN"))
     private void forceGraphicsMode(GameConfig gameConfig, CallbackInfo ci) {
@@ -52,18 +56,9 @@ public class MinecraftMixin {
     }
 
 
-    @Inject(method = "close", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/renderer/VirtualScreen;close()V"))
+    @Inject(method = "close", at = @At(value = "RETURN"))
     public void close2(CallbackInfo ci) {
         Vulkan.cleanUp();
     }
-
-    @Inject(method = "resizeDisplay", at = @At("HEAD"))
-    public void onResolutionChanged(CallbackInfo ci) {
-        Renderer.scheduleSwapChainUpdate();
-    }
-
-    // Fixes crash when minimizing window before setScreen is called
-    @Redirect(method = "setScreen", at = @At(value = "FIELD", target = "Lnet/minecraft/client/Minecraft;noRender:Z", opcode = Opcodes.PUTFIELD))
-    private void keepVar(Minecraft instance, boolean value) {}
 
 }

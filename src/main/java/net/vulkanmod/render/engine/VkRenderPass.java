@@ -2,8 +2,10 @@ package net.vulkanmod.render.engine;
 
 import com.mojang.blaze3d.buffers.GpuBuffer;
 import com.mojang.blaze3d.buffers.GpuBufferSlice;
+import com.mojang.blaze3d.opengl.GlStateManager;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
 import com.mojang.blaze3d.systems.RenderPass;
+import com.mojang.blaze3d.systems.RenderPassBackend;
 import com.mojang.blaze3d.systems.ScissorState;
 import com.mojang.blaze3d.textures.GpuSampler;
 import com.mojang.blaze3d.textures.GpuTextureView;
@@ -14,14 +16,11 @@ import java.util.HashSet;
 import java.util.Set;
 import java.util.function.Supplier;
 
-import net.fabricmc.api.EnvType;
-import net.fabricmc.api.Environment;
 import net.minecraft.SharedConstants;
 import net.vulkanmod.interfaces.shader.ExtendedRenderPipeline;
 import org.jetbrains.annotations.Nullable;
 
-@Environment(EnvType.CLIENT)
-public class VkRenderPass implements RenderPass {
+public class VkRenderPass implements RenderPassBackend {
     protected static final int MAX_VERTEX_BUFFERS = 1;
     public static final boolean VALIDATION = SharedConstants.IS_RUNNING_IN_IDE;
     private final VkCommandEncoder encoder;
@@ -117,6 +116,11 @@ public class VkRenderPass implements RenderPass {
     }
 
     @Override
+    public void setViewport(int x, int y, int width, int height) {
+        GlStateManager._viewport(x, y, width, height);
+    }
+
+    @Override
     public void enableScissor(int i, int j, int k, int l) {
         this.scissorState.enable(i, j, k, l);
     }
@@ -208,11 +212,15 @@ public class VkRenderPass implements RenderPass {
         }
     }
 
+    @Override
+    public boolean isClosed() {
+        return this.closed;
+    }
+
     public @Nullable RenderPipeline getPipeline() {
         return pipeline;
     }
 
-    @Environment(EnvType.CLIENT)
     protected record TextureViewAndSampler(VkTextureView view, VkSampler sampler) {
     }
 }

@@ -24,7 +24,7 @@ public class KeyboardHandlerM {
      */
     @Inject(method = "charTyped", at = @At("HEAD"), cancellable = true)
     private void cancelCtrlCharTyped(long window, CharacterEvent event, CallbackInfo ci) {
-        if (Platform.isWayLand() && (event.modifiers() & GLFW.GLFW_MOD_CONTROL) != 0) {
+        if (Platform.isWayLand() && (GLFW.glfwGetKey(window, GLFW.GLFW_KEY_LEFT_CONTROL) == GLFW.GLFW_PRESS || GLFW.glfwGetKey(window, GLFW.GLFW_KEY_RIGHT_CONTROL) == GLFW.GLFW_PRESS)) {
             ci.cancel();
         }
     }

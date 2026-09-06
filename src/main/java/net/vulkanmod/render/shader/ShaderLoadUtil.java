@@ -21,7 +21,7 @@ import java.util.Set;
 
 public abstract class ShaderLoadUtil {
 
-    public static final String RESOURCES_PATH = SpirvCompiler.class.getResource("/assets/vulkanmod").toExternalForm();
+    public static final String RESOURCES_PATH = "/assets/vulkanmod";
     public static final String SHADERS_PATH = "%s/shaders/".formatted(RESOURCES_PATH);
 
     public static final Set<String> REMAPPED_SHADERS = Sets.newHashSet("core/screenquad.vsh",
@@ -247,6 +247,10 @@ public abstract class ShaderLoadUtil {
     }
 
     public static InputStream getInputStream(String path) {
+        // NeoForge exposes resource files, but need not expose directory URLs.
+        if (path.startsWith(RESOURCES_PATH + "/")) {
+            return ShaderLoadUtil.class.getResourceAsStream(path);
+        }
         try {
             var path1 = Paths.get(new URI(path));
 

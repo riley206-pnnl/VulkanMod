@@ -2,8 +2,7 @@ package net.vulkanmod.mixin.render.vertex;
 
 import com.mojang.blaze3d.vertex.*;
 import net.minecraft.client.model.geom.builders.UVPair;
-import net.minecraft.client.renderer.LightTexture;
-import net.minecraft.client.renderer.block.model.BakedQuad;
+import net.minecraft.client.resources.model.geometry.BakedQuad;
 import net.vulkanmod.interfaces.ExtendedVertexBuilder;
 import net.vulkanmod.mixin.matrix.PoseAccessor;
 import net.vulkanmod.render.util.MathUtil;
@@ -34,7 +33,7 @@ public abstract class BufferBuilderM
     public void vertex(float x, float y, float z, int packedColor, float u, float v, int overlay, int light, int packedNormal) {
         this.ptr = this.beginVertex();
 
-        if (this.format == DefaultVertexFormat.NEW_ENTITY) {
+        if (this.format == DefaultVertexFormat.ENTITY) {
             MemoryUtil.memPutFloat(ptr + 0, x);
             MemoryUtil.memPutFloat(ptr + 4, y);
             MemoryUtil.memPutFloat(ptr + 8, z);
@@ -164,47 +163,6 @@ public abstract class BufferBuilderM
         }
 
         return this;
-    }
-
-    private final float[] brightness = new float[4];
-    private final int[] lights = new int[4];
-
-    @Override
-    public void putBulkData(PoseStack.Pose pose, BakedQuad bakedQuad, float r, float g, float b, float a, int light, int overlay) {
-        brightness[0] = 1.0f; brightness[1] = 1.0f; brightness[2] = 1.0f; brightness[3] = 1.0f;
-        lights[0] = light; lights[1] = light; lights[2] = light; lights[3] = light;
-
-        this.putBulkData(pose, bakedQuad, brightness, r, g, b, a, lights, overlay);
-    }
-
-    @Override
-    public void putBulkData(PoseStack.Pose pose, BakedQuad bakedQuad, float[] brightness, float r, float g, float b, float a,
-                            int[] lights, int overlay) {
-        Vector3fc vector3fc = bakedQuad.direction().getUnitVec3f();
-        Matrix4f matrix4f = pose.pose();
-        boolean trustedNormals = ((PoseAccessor)(Object)pose).trustedNormals();
-        int packedNormal = MathUtil.packTransformedNorm(pose.normal(), trustedNormals, vector3fc.x(), vector3fc.y(), vector3fc.z());
-
-        int lightEmission = bakedQuad.lightEmission();
-
-        for (int l = 0; l < 4; l++) {
-            Vector3fc quadPos = bakedQuad.position(l);
-            long packedUV = bakedQuad.packedUV(l);
-            float br = brightness[l];
-            int color = ColorUtil.RGBA.pack(r * br, g * br, b * br, a);
-            int light = LightTexture.lightCoordsWithEmission(lights[l], lightEmission);
-
-            float x = quadPos.x();
-            float y = quadPos.y();
-            float z = quadPos.z();
-            float tx = MathUtil.transformX(matrix4f, x, y, z);
-            float ty = MathUtil.transformY(matrix4f, x, y, z);
-            float tz = MathUtil.transformZ(matrix4f, x, y, z);
-
-            float u = UVPair.unpackU(packedUV);
-            float v = UVPair.unpackV(packedUV);
-            this.vertex(tx, ty, tz, color, u, v, overlay, light, packedNormal);
-        }
     }
 
     private static int packRgba(int r, int g, int b, int a) {

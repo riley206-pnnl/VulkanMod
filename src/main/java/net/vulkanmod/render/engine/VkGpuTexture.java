@@ -7,14 +7,11 @@ import com.mojang.blaze3d.textures.GpuTexture;
 import com.mojang.blaze3d.textures.TextureFormat;
 import it.unimi.dsi.fastutil.ints.*;
 import it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap;
-import net.fabricmc.api.EnvType;
-import net.fabricmc.api.Environment;
 import net.vulkanmod.gl.VkGlTexture;
 import net.vulkanmod.vulkan.texture.VulkanImage;
 import org.jetbrains.annotations.Nullable;
 import org.lwjgl.vulkan.VK10;
 
-@Environment(EnvType.CLIENT)
 public class VkGpuTexture extends GlTexture {
     private static final Reference2ReferenceOpenHashMap<GlTexture, VkGpuTexture> glToVkMap = new Reference2ReferenceOpenHashMap<>();
 
@@ -69,7 +66,7 @@ public class VkGpuTexture extends GlTexture {
         int depthAttachmentId = depthAttachment == null ? 0 : ((VkGpuTexture)depthAttachment).id;
 
         if (this.fboView == null) {
-            VkGpuDevice gpuDevice = (VkGpuDevice) RenderSystem.getDevice();
+            VkGpuDevice gpuDevice = VkGpuDevice.getInstance();
             this.fboView = (VkTextureView) gpuDevice.createTextureView(this, 0, this.getMipLevels());
         }
 
@@ -85,9 +82,9 @@ public class VkGpuTexture extends GlTexture {
             var name = glTexture.getLabel();
             int id = glTexture.glId();
             VkGlTexture vglTexture = VkGlTexture.getTexture(id);
-            VkGpuTexture gpuTexture = new VkGpuTexture(0, name, glTexture.getFormat(),
+            VkGpuTexture gpuTexture = new VkGpuTexture(glTexture.usage(), name, glTexture.getFormat(),
                                                        glTexture.getWidth(0), glTexture.getHeight(0),
-                                                       1, glTexture.getMipLevels(),
+                                                       glTexture.getDepthOrLayers(), glTexture.getMipLevels(),
                                                        glTexture.glId(), vglTexture);
 
             return gpuTexture;
@@ -99,6 +96,8 @@ public class VkGpuTexture extends GlTexture {
             case VK10.VK_FORMAT_R8G8B8A8_UNORM, VK10.VK_FORMAT_B8G8R8A8_UNORM, VK10.VK_FORMAT_R8G8B8A8_SRGB -> TextureFormat.RGBA8;
             case VK10.VK_FORMAT_R8_UNORM -> TextureFormat.RED8;
             case VK10.VK_FORMAT_D32_SFLOAT -> TextureFormat.DEPTH32;
+            case VK10.VK_FORMAT_D24_UNORM_S8_UINT -> TextureFormat.DEPTH24_STENCIL8;
+            case VK10.VK_FORMAT_D32_SFLOAT_S8_UINT -> TextureFormat.DEPTH32_STENCIL8;
             default -> null;
         };
     }
@@ -109,6 +108,8 @@ public class VkGpuTexture extends GlTexture {
             case RED8 -> VK10.VK_FORMAT_R8_UNORM;
             case RED8I -> VK10.VK_FORMAT_R8_SINT;
             case DEPTH32 -> VK10.VK_FORMAT_D32_SFLOAT;
+            case DEPTH24_STENCIL8 -> VK10.VK_FORMAT_D24_UNORM_S8_UINT;
+            case DEPTH32_STENCIL8 -> VK10.VK_FORMAT_D32_SFLOAT_S8_UINT;
         };
     }
 
@@ -124,4 +125,3 @@ public class VkGpuTexture extends GlTexture {
         return viewType;
     }
 }
-

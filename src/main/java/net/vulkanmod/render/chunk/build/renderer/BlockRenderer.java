@@ -1,18 +1,18 @@
 package net.vulkanmod.render.chunk.build.renderer;
 
 import com.mojang.blaze3d.vertex.VertexConsumer;
-import net.fabricmc.fabric.api.renderer.v1.mesh.ShadeMode;
-import net.fabricmc.fabric.api.util.TriState;
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.renderer.ItemBlockRenderTypes;
-import net.minecraft.client.renderer.block.model.BlockStateModel;
-import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
 import net.minecraft.core.BlockPos;
-import net.minecraft.world.level.BlockAndTintGetter;
+import net.minecraft.util.TriState;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.block.dispatch.BlockStateModel;
+import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
+import net.minecraft.client.renderer.block.BlockAndTintGetter;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.levelgen.SingleThreadedRandomSource;
 import net.minecraft.world.phys.Vec3;
 import net.vulkanmod.Initializer;
+import net.vulkanmod.render.chunk.build.frapi.helper.fabric.ShadeMode;
+import net.vulkanmod.render.chunk.build.frapi.helper.fabric.interfaces.FabricBlockStateModel;
 import net.vulkanmod.render.chunk.build.frapi.mesh.MutableQuadViewImpl;
 import net.vulkanmod.render.chunk.build.frapi.render.AbstractBlockRenderContext;
 import net.vulkanmod.render.chunk.build.light.LightPipeline;
@@ -54,13 +54,12 @@ public class BlockRenderer extends AbstractBlockRenderContext {
         this.blockState = blockState;
         this.random.setSeed(blockState.getSeed(blockPos));
 
-        TerrainRenderType renderType = TerrainRenderType.get(ItemBlockRenderTypes.getChunkRenderType(blockState));
-        renderType = TerrainRenderType.getRemapped(renderType);
+        TerrainRenderType renderType = TerrainRenderType.SOLID;
         this.renderType = renderType;
         this.terrainBuilder = this.resources.builderPack.builder(renderType);
         this.terrainBuilder.setBlockAttributes(blockState);
 
-        BlockStateModel model = Minecraft.getInstance().getBlockRenderer().getBlockModel(blockState);
+        BlockStateModel model = Minecraft.getInstance().getModelManager().getBlockStateModelSet().get(blockState);
 
         BlockAndTintGetter renderRegion = this.renderRegion;
         Vec3 offset = blockState.getOffset(blockPos);
@@ -68,7 +67,7 @@ public class BlockRenderer extends AbstractBlockRenderContext {
 
         this.prepareForBlock(blockState, blockPos, blockState.getLightEmission() == 0);
 
-        model.emitQuads(this.getEmitter(), renderRegion, blockPos, blockState, this.random, this::isFaceCulled);
+        ((FabricBlockStateModel)model).emitQuads(this.getEmitter(), renderRegion, blockPos, blockState, this.random, this::isFaceCulled);
     }
 
     @Override

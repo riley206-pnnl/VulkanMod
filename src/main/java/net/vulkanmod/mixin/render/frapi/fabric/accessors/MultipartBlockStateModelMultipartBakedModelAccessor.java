@@ -14,16 +14,16 @@
  * limitations under the License.
  */
 
-package net.vulkanmod.render.chunk.build.frapi.accessor;
+package net.vulkanmod.mixin.render.frapi.fabric.accessors;
 
-import net.fabricmc.fabric.impl.client.indigo.renderer.render.TerrainRenderContext;
+import java.util.List;
+import net.minecraft.client.renderer.block.dispatch.BlockStateModel;
+import net.minecraft.client.renderer.block.dispatch.multipart.MultiPartModel;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.gen.Accessor;
 
-/**
- * Used to stash block renderer reference in local scope during
- * chunk rebuild, thus avoiding repeated thread-local lookups.
- */
-public interface AccessChunkRendererRegion {
-	TerrainRenderContext fabric_getRenderer();
-
-	void fabric_setRenderer(TerrainRenderContext renderer);
+@Mixin(MultiPartModel.SharedBakedState.class)
+public interface MultipartBlockStateModelMultipartBakedModelAccessor {
+    @Accessor("selectors")
+    List<MultiPartModel.Selector<BlockStateModel>> getSelectors();
 }

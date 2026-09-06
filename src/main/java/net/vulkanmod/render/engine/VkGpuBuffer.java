@@ -4,17 +4,13 @@ import com.mojang.blaze3d.buffers.GpuBuffer;
 
 import java.nio.ByteBuffer;
 import java.util.function.Supplier;
-import net.fabricmc.api.EnvType;
-import net.fabricmc.api.Environment;
 import net.vulkanmod.vulkan.memory.MemoryManager;
 import net.vulkanmod.vulkan.memory.MemoryType;
 import net.vulkanmod.vulkan.memory.MemoryTypes;
 import net.vulkanmod.vulkan.memory.buffer.Buffer;
 import org.jetbrains.annotations.Nullable;
-
 import static org.lwjgl.vulkan.VK10.*;
 
-@Environment(EnvType.CLIENT)
 public class VkGpuBuffer extends GpuBuffer {
     protected boolean closed;
     @Nullable protected final Supplier<String> label;
@@ -105,7 +101,6 @@ public class VkGpuBuffer extends GpuBuffer {
         return new VkGpuBuffer(buffer);
     }
 
-    @Environment(EnvType.CLIENT)
     public static class MappedView implements GpuBuffer.MappedView {
         private final int target;
         private final ByteBuffer data;
