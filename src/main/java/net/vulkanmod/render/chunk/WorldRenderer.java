@@ -6,6 +6,7 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import net.minecraft.client.Camera;
+import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.TextureFilteringMethod;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -17,6 +18,8 @@ import net.minecraft.client.renderer.culling.Frustum;
 import net.minecraft.client.renderer.entity.EntityRenderDispatcher;
 import net.minecraft.client.renderer.feature.FeatureRenderDispatcher;
 import net.minecraft.client.renderer.feature.ModelFeatureRenderer;
+import net.minecraft.client.renderer.feature.ShadowFeatureRenderer;
+import net.minecraft.client.renderer.SubmitNodeCollection;
 import net.minecraft.client.renderer.state.level.LevelRenderState;
 import net.minecraft.client.renderer.texture.AbstractTexture;
 import net.minecraft.client.renderer.texture.TextureAtlas;
@@ -33,7 +36,16 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.Vec3;
 import net.vulkanmod.Initializer;
 import net.vulkanmod.render.shader.PipelineManager;
+import net.vulkanmod.mixin.render.feature.FeatureRenderDispatcherAccessor;
+import net.vulkanmod.shaders.PackFramebuffers;
+import net.vulkanmod.shaders.PackCompositePipeline;
+import net.vulkanmod.shaders.PackDebug;
 import net.vulkanmod.shaders.PackTerrainPipeline;
+import net.vulkanmod.shaders.PackShadowMatrices;
+import net.vulkanmod.shaders.PackShadowPipeline;
+import net.vulkanmod.shaders.PackSkyPipeline;
+import net.vulkanmod.shaders.QuadRenderer;
+import org.lwjgl.system.MemoryStack;
 import net.vulkanmod.render.chunk.buffer.DrawBuffers;
 import net.vulkanmod.render.chunk.build.RenderRegionBuilder;
 import net.vulkanmod.render.chunk.build.task.TaskDispatcher;
@@ -91,6 +103,9 @@ public class WorldRenderer {
 
     private float partialTick;
     private final Vector3d cameraPos = new Vector3d();
+    private PackShadowMatrices.State activeShadowMatrices;
+    private Matrix4f lastCameraModelView;
+    private Matrix4f lastCameraProjection;
     private int lastCameraSectionX;
     private int lastCameraSectionY;
     private int lastCameraSectionZ;
@@ -292,11 +307,22 @@ public class WorldRenderer {
         this.lastCameraSectionX = Integer.MIN_VALUE;
         this.lastCameraSectionY = Integer.MIN_VALUE;
         this.lastCameraSectionZ = Integer.MIN_VALUE;
+        // Do not let a dimension's light-space transform leak into the next
+        // world's first frame. The shadow target is rebuilt lazily after the
+        // first visible terrain submission, so the pre-shadow frame must use
+        // deterministic bootstrap state rather than stale Nether/Overworld
+        // matrices.
+        this.activeShadowMatrices = null;
 
 //        this.entityRenderDispatcher.setLevel(level);
         this.level = level;
         ChunkStatusMap.createInstance(renderDistance);
         if (level != null) {
+            // Iris keeps separate world0/world-1/world1 program namespaces.
+            // Rebuild the pack-owned pipelines before the new level starts
+            // submitting geometry so Nether and End do not reuse overworld
+            // macros, sky code, or composite passes.
+            PipelineManager.reloadPackDimension(shaderDimension(level));
             this.allChanged();
         } else {
             if (this.sectionGrid != null) {
@@ -320,7 +346,41 @@ public class WorldRenderer {
     }
 
     public void renderSectionLayer(TerrainRenderType renderType, double camX, double camY, double camZ, Matrix4f modelView, Matrix4f projection) {
+        renderSectionLayer(renderType, camX, camY, camZ, modelView, projection, null);
+    }
+
+    public void renderSectionLayer(TerrainRenderType renderType, double camX, double camY, double camZ, Matrix4f modelView, Matrix4f projection, Matrix4f cleanProjection) {
+        // With uniqueOpaqueLayer enabled, the chunk graph places both solid
+        // and cutout geometry in the CUTOUT buffer and the SOLID callback is
+        // intentionally empty.  Shadow/sky preparation must therefore run on
+        // whichever callback is the real first opaque layer.
+        boolean firstOpaqueLayer = renderType == TerrainRenderType.SOLID
+                || (renderType == TerrainRenderType.CUTOUT && Initializer.CONFIG.uniqueOpaqueLayer);
+        if (firstOpaqueLayer) {
+            lastCameraModelView = new Matrix4f(modelView);
+            lastCameraProjection = new Matrix4f(projection);
+        }
         Renderer.getInstance().getMainPass().rebindMainTarget();
+
+        if (firstOpaqueLayer && PackCompositePipeline.isActive()) {
+            // The pack may read an attachment before any pass writes it.
+            // End the vanilla scope before issuing the explicit transfer
+            // clears, then let the sky/terrain paths establish their own
+            // rendering scopes.
+            Renderer.getInstance().endRenderPass();
+            try (MemoryStack stack = MemoryStack.stackPush()) {
+                PackFramebuffers.clearColorTargets(Renderer.getCommandBuffer(), stack);
+            }
+        }
+
+        if (firstOpaqueLayer && PipelineManager.getPackSkyShader() != null
+                && !Boolean.getBoolean("vulkanmod.disablePackSky")) {
+            renderPackSky(modelView, projection, cleanProjection);
+            Renderer.getInstance().getMainPass().rebindMainTarget();
+        } else if (firstOpaqueLayer && PipelineManager.getPackSkyShader() != null
+                && Boolean.getBoolean("vulkanmod.disablePackSky")) {
+            Initializer.LOGGER.warn("Pack sky stage disabled by diagnostic property");
+        }
 
         this.sortTranslucentSections(camX, camY, camZ);
 
@@ -328,7 +388,6 @@ public class WorldRenderer {
         Zone zone = mcProfiler.zone(() -> "render_" + renderType);
 
         final boolean isTranslucent = renderType == TerrainRenderType.TRANSLUCENT;
-        final boolean indirectDraw = Initializer.CONFIG.indirectDraw;
 
         if (!isTranslucent) {
             GlStateManager._disableBlend();
@@ -354,6 +413,18 @@ public class WorldRenderer {
 
         Renderer renderer = Renderer.getInstance();
         GraphicsPipeline pipeline = PipelineManager.getTerrainShader(renderType);
+        boolean isPackShader = PipelineManager.isPackShader(pipeline);
+        // Shader-pack draws depend on a distinct firstInstance for every
+        // section because vm_SectionData is indexed from gl_InstanceIndex.
+        // Keep the pack baseline on direct indexed draws until the indirect
+        // command path has an equivalent per-section contract.
+        final boolean indirectDraw = Initializer.CONFIG.indirectDraw && !isPackShader;
+        if (isPackShader) {
+            renderer.endRenderPass();
+            try (MemoryStack stack = MemoryStack.stackPush()) {
+                PackFramebuffers.beginTerrainMRT(Renderer.getCommandBuffer(), stack, PackTerrainPipeline.getDrawBuffers(pipeline));
+            }
+        }
         renderer.bindGraphicsPipeline(pipeline);
 
         TextureManager textureManager = Minecraft.getInstance().getTextureManager();
@@ -364,7 +435,7 @@ public class WorldRenderer {
         var texture = (VkGpuTexture)texView.texture();
 
         if (this.terrainSampler == 0L) {
-            this.terrainSampler = SamplerManager.getSampler(true, true, texture.getVulkanImage().mipLevels - 1, useAnisotropy, maxAnisotropy);
+            this.terrainSampler = SamplerManager.getTerrainSampler(texture.getVulkanImage().mipLevels - 1, useAnisotropy, maxAnisotropy);
         }
 
         texture.getVulkanImage().setSampler(this.terrainSampler);
@@ -379,7 +450,11 @@ public class WorldRenderer {
 
         VRenderSystem.setTextureSize(atlasTexWidth, atlasTexHeight);
         VRenderSystem.setCurrentTime((int) System.currentTimeMillis());
-        PackTerrainPipeline.update(pipeline);
+        // The shadow pass is rendered immediately before the camera G-buffer.
+        // Reuse its light-space matrices here so Complementary's shadow2D
+        // lookups address the map that was just populated instead of the
+        // identity transform used by the old compatibility path.
+        PackTerrainPipeline.update(pipeline, cleanProjection, activeShadowMatrices);
 
         long currentTimeMs = System.currentTimeMillis();
         float fadeTime = Minecraft.getInstance().options.chunkSectionFadeInTime().get().floatValue();
@@ -415,18 +490,28 @@ public class WorldRenderer {
                     renderer.uploadAndBindUBOs(pipeline);
 
                     if (indirectDraw) {
-                        drawBuffers.buildDrawBatchesIndirect(cameraPos, indirectBuffers[currentFrame], queue, renderType);
+                        drawBuffers.buildDrawBatchesIndirect(cameraPos, indirectBuffers[currentFrame], queue, renderType,
+                                Boolean.getBoolean("vulkanmod.debugTerrainNoCulling"));
                     }
                     else {
-                        drawBuffers.buildDrawBatchesDirect(cameraPos, queue, renderType);
+                        if (isPackShader) {
+                            drawBuffers.buildDrawBatchesDirectPack(cameraPos, queue, renderType,
+                                    Boolean.getBoolean("vulkanmod.debugTerrainNoCulling"));
+                        } else {
+                            drawBuffers.buildDrawBatchesDirect(cameraPos, queue, renderType,
+                                    Boolean.getBoolean("vulkanmod.debugTerrainNoCulling"));
+                        }
                     }
                 } else {
                     if (drawBuffers.getAreaBuffer(renderType) == null) noBufferCount++;
                     if (queue.size() == 0) emptyQueueCount++;
                 }
             }
-            if (renderType == TerrainRenderType.SOLID && areaCount > 0) {
-                Initializer.LOGGER.debug("VulkanMod DRAW: renderType={}, areas={}, drawn={}, noBuffer={}, emptyQueue={}", renderType, areaCount, drawnCount, noBufferCount, emptyQueueCount);
+            if ((renderType == TerrainRenderType.SOLID || renderType == TerrainRenderType.CUTOUT) && areaCount > 0) {
+                PackDebug.setTerrainStats(areaCount, drawnCount, noBufferCount, emptyQueueCount);
+                if (Boolean.getBoolean("vulkanmod.debugChunkReadiness") && PackDebug.shouldLog()) {
+                    Initializer.LOGGER.info("VulkanMod DRAW: renderType={}, areas={}, drawn={}, noBuffer={}, emptyQueue={}", renderType, areaCount, drawnCount, noBufferCount, emptyQueueCount);
+                }
             }
         }
 
@@ -441,9 +526,296 @@ public class WorldRenderer {
             renderer.pushConstants(pipeline);
         }
 
+        if (isPackShader) {
+            PackFramebuffers.endTerrainMRT(Renderer.getCommandBuffer());
+            renderer.getMainPass().rebindMainTarget();
+        }
+
+        // The visible opaque section draw also submits/uploads the chunk
+        // buffers used by the shadow caster.  Run the shadow stage after that
+        // draw, but still before LevelRenderer begins the deferred/composite
+        // chain, so the shadow map contains real terrain and can be sampled by
+        // composite1.  Running it before the opaque draw leaves the first
+        // frame with an empty caster set (shadow drawn=0).
+        if (firstOpaqueLayer && PipelineManager.getPackShadowShader() != null) {
+            renderPackShadow(camX, camY, camZ, modelView, projection, cleanProjection);
+            renderer.getMainPass().rebindMainTarget();
+        }
+
         Renderer.popDebugSection();
 
         zone.close();
+    }
+
+    private void renderPackShadow(double camX, double camY, double camZ,
+                                  Matrix4f cameraModelView, Matrix4f cameraProjection,
+                                  Matrix4f cleanProjection) {
+        Renderer renderer = Renderer.getInstance();
+        GraphicsPipeline shadow = PipelineManager.getPackShadowShader();
+        if (shadow == null) return;
+        if (Boolean.getBoolean("vulkanmod.disablePackShadow")) {
+            // Runtime isolation switch only. It lets us distinguish a device
+            // loss in the shadow render/secondary-depth copy from a failure
+            // in the camera G-buffer or composite chain without changing the
+            // normal High-quality path.
+            Initializer.LOGGER.warn("Pack shadow stage disabled by diagnostic property");
+            return;
+        }
+
+        ClientLevel level = this.level;
+        long worldDayTime = level == null ? 6000L : level.getOverworldClockTime();
+        long debugTime = Long.getLong("vulkanmod.debugTime", -1L);
+        long dayTime = debugTime >= 0L ? debugTime : worldDayTime;
+        float sunAngle = Math.floorMod(dayTime, 24000L) / 24000.0f;
+        var config = PipelineManager.getPackConfig();
+        float distance = config == null ? 192.0f : (float) config.shadowDistance();
+        PackShadowMatrices.State matrices = PackShadowMatrices.compute(
+                sunAngle, (float) camX, (float) camY, (float) camZ,
+                distance, PackFramebuffers.getShadowResolution());
+        activeShadowMatrices = matrices;
+        PackShadowPipeline.setMatrices(shadow, matrices);
+
+        renderer.endRenderPass();
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            PackFramebuffers.beginShadow(Renderer.getCommandBuffer(), stack,
+                    PackShadowPipeline.getDrawBuffers(shadow));
+        }
+        // Shadow rendering owns its raster state.  Do not inherit the
+        // fullscreen sky/composite state (depth disabled, writes masked, or
+        // non-triangle topology) from the preceding camera pass.
+        GlStateManager._disableBlend();
+        GlStateManager._disableCull();
+        VRenderSystem.cullMode = org.lwjgl.vulkan.VK10.VK_CULL_MODE_NONE;
+        GlStateManager._colorMask(com.mojang.blaze3d.pipeline.ColorTargetState.WRITE_ALL);
+        VRenderSystem.colorMask(true, true, true, true);
+        GlStateManager._enableDepthTest();
+        GlStateManager._depthMask(true);
+        // Shadow rendering must not inherit wireframe/point mode or polygon
+        // offset from a preceding debug/terrain pass.  In line mode the
+        // shadow attachment contains only sparse triangle edges, which looks
+        // exactly like an empty shadow map when sampled by the composite.
+        GlStateManager._disablePolygonOffset();
+        VRenderSystem.setPolygonModeGL(GL11.GL_FILL);
+        VRenderSystem.glDepthFun(Boolean.getBoolean("vulkanmod.debugShadowDepthAlways")
+                ? GL11.GL_ALWAYS : GL11.GL_LEQUAL);
+        VRenderSystem.setPrimitiveTopologyGL(GL11.GL_TRIANGLES);
+        renderer.bindGraphicsPipeline(shadow);
+
+        TextureManager textureManager = Minecraft.getInstance().getTextureManager();
+        AbstractTexture atlasTexture = textureManager.getTexture(TextureAtlas.LOCATION_BLOCKS);
+        var texView = atlasTexture.getTextureView();
+        var texture = (VkGpuTexture) texView.texture();
+        texture.getVulkanImage().setSampler(this.terrainSampler);
+        VRenderSystem.setShaderTexture(0, texView);
+        VRenderSystem.setShaderTexture(2, Minecraft.getInstance().gameRenderer.lightmap());
+        VTextureSelector.bindShaderTextures(shadow);
+        // The pack's shadow vertex shader reconstructs the original caster
+        // position from ftransform() using shadowProjectionInverse and
+        // shadowModelViewInverse.  Uploading the camera MVP here (before the
+        // light MVP is installed) makes that reconstruction land in the
+        // wrong space and produces an apparently empty shadow map.
+        // VRenderSystem's legacy MVP is the host/Vulkan-facing matrix. The
+        // pack-facing shadowProjection remains OpenGL convention and is
+        // converted once by PackShadowPipeline.update before ftransform() is
+        // evaluated. Feeding the OpenGL form here would apply that conversion
+        // twice and put the casters in the wrong light-space depth range.
+        VRenderSystem.applyMVP(matrices.modelView(), matrices.renderProjection());
+        PackShadowPipeline.update(shadow, cleanProjection);
+
+        int currentFrame = Renderer.getCurrentFrame();
+        UBO sectionData = shadow.getUBO(2);
+        sectionData.setUseGlobalBuffer(false);
+        IndexBuffer indexBuffer = Renderer.getDrawer().getQuadsIndexBuffer().getIndexBuffer();
+        Renderer.getDrawer().bindIndexBuffer(Renderer.getCommandBuffer(), indexBuffer, indexBuffer.indexType.value);
+        long currentTimeMs = System.currentTimeMillis();
+        int fadeTimeMs = 0;
+        float fadeTimeInv = 1.0f;
+        int shadowDrawn = 0;
+        int shadowAreasInFrustum = 0;
+        int shadowAreasChecked = 0;
+        boolean debugShadowBounds = Boolean.getBoolean("vulkanmod.debugShadowBounds");
+        StringBuilder shadowBounds = debugShadowBounds ? new StringBuilder() : null;
+        // Pack shadow vertex shaders index vm_SectionData from the draw's
+        // firstInstance.  The camera pack path already uses direct indexed
+        // draws because that contract is not guaranteed by the legacy
+        // indirect batching path; use the same path for casters so trees and
+        // terrain cannot silently miss the shadow map.
+        final boolean shadowIndirect = false;
+        // Cutout geometry is essential for foliage, panes and many block
+        // entities.  Complementary expects it in shadowtex0 just like solid
+        // terrain, with the pack's shadow fragment performing alpha discard.
+        for (TerrainRenderType casterType : new TerrainRenderType[]{TerrainRenderType.SOLID, TerrainRenderType.CUTOUT}) {
+            casterType.setCutoutUniform();
+            for (Iterator<ChunkArea> iterator = this.sectionGraph.getChunkAreaQueue().iterator(false); iterator.hasNext();) {
+                ChunkArea area = iterator.next();
+                DrawBuffers buffers = area.drawBuffers;
+                if (buffers.getAreaBuffer(casterType) == null || area.sectionQueue.size() == 0) continue;
+                shadowDrawn++;
+                if (debugShadowBounds && shadowAreasChecked < 8) {
+                    var areaPos = area.getPosition();
+                    float minX = (float) (areaPos.x() - camX);
+                    float minY = (float) (areaPos.y() - camY);
+                    float minZ = (float) (areaPos.z() - camZ);
+                    var bounds = PackShadowMatrices.transformBounds(matrices,
+                            minX, minY, minZ, minX + 128.0f, minY + 128.0f, minZ + 128.0f);
+                    if (bounds.intersectsUnitCube()) shadowAreasInFrustum++;
+                    shadowBounds.append(" area[").append(areaPos.x()).append(',')
+                            .append(areaPos.y()).append(',').append(areaPos.z())
+                            .append("] ndc=").append(bounds)
+                            .append(" inside=").append(bounds.intersectsUnitCube());
+                    shadowAreasChecked++;
+                }
+                buffers.bindBuffers(Renderer.getCommandBuffer(), shadow, casterType,
+                        sectionData, camX, camY, camZ, currentTimeMs, fadeTimeMs, fadeTimeInv);
+                renderer.uploadAndBindUBOs(shadow);
+                if (Boolean.getBoolean("vulkanmod.debugShadowDraws")) {
+                    var firstSection = area.sectionQueue.iterator(false);
+                    while (firstSection.hasNext()) {
+                        if (buffers.debugPackShadowDraw(firstSection.next(), casterType)) break;
+                    }
+                }
+                if (shadowIndirect) {
+                    buffers.buildDrawBatchesIndirect(cameraPos, indirectBuffers[currentFrame],
+                            area.sectionQueue, casterType, true);
+                } else {
+                    buffers.buildDrawBatchesDirectPack(cameraPos, area.sectionQueue, casterType, true);
+                }
+            }
+        }
+        if (shadowIndirect) indirectBuffers[currentFrame].submitUploads();
+        if (!shadowIndirect) {
+            VRenderSystem.setModelOffset(0, 0, 0);
+            renderer.pushConstants(shadow);
+        }
+        PackFramebuffers.endShadow(Renderer.getCommandBuffer());
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            PackFramebuffers.copyShadowDepthToSecondary(Renderer.getCommandBuffer(), stack);
+            PackFramebuffers.transitionShadowsToRead(Renderer.getCommandBuffer(), stack);
+        }
+        VRenderSystem.applyMVP(cameraModelView, cameraProjection);
+        PackDebug.setShadowDrawn(shadowDrawn);
+        if (PackDebug.shouldLog()) {
+            Initializer.LOGGER.info("VulkanMod DRAW: {}", PackDebug.shadowSummary());
+        }
+        if (debugShadowBounds && PackDebug.shouldLog()) {
+            Initializer.LOGGER.info("VulkanMod SHADOW_BOUNDS: checked={} inside={}{}",
+                    shadowAreasChecked, shadowAreasInFrustum,
+                    shadowBounds == null ? "" : shadowBounds);
+        }
+        Initializer.LOGGER.debug("Pack shadow rendered at angle {}", sunAngle);
+    }
+
+    /** Render submitted entity/block-entity shadow quads into the populated
+     * shadow map without clearing the terrain depth/color attachments. */
+    public void renderPackEntityShadows() {
+        GraphicsPipeline shadow = PipelineManager.getPackEntityShadowShader();
+        if (shadow == null || activeShadowMatrices == null) return;
+
+        Renderer renderer = Renderer.getInstance();
+        renderer.endRenderPass();
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            PackFramebuffers.beginShadow(Renderer.getCommandBuffer(), stack,
+                    PackShadowPipeline.getDrawBuffers(shadow), false);
+        }
+        GlStateManager._disableBlend();
+        // Entity and foliage shadow meshes are two-sided in the light pass.
+        GlStateManager._disableCull();
+        VRenderSystem.cullMode = org.lwjgl.vulkan.VK10.VK_CULL_MODE_NONE;
+        GlStateManager._enableDepthTest();
+        GlStateManager._depthMask(true);
+        GlStateManager._disablePolygonOffset();
+        VRenderSystem.setPolygonModeGL(GL11.GL_FILL);
+        VRenderSystem.glDepthFun(GL11.GL_LEQUAL);
+        VRenderSystem.setPrimitiveTopologyGL(GL11.GL_TRIANGLES);
+        renderer.bindGraphicsPipeline(shadow);
+        PackShadowPipeline.setMatrices(shadow, activeShadowMatrices);
+        // RenderTypeM reads RenderSystem's model-view matrix when it uploads
+        // each immediate entity mesh.  Setting only Vulkan's cached MVP here
+        // leaves those meshes in camera space while using the shadow
+        // projection, so the draw count looks healthy but the caster lands
+        // outside the directional shadow map.
+        VRenderSystem.applyModelViewMatrix(activeShadowMatrices.modelView());
+        // Entity shadow meshes use the same host MVP contract as terrain:
+        // rasterize with Vulkan's zero-to-one projection, while the pack UBO
+        // exposes the conventional OpenGL shadowProjection.
+        VRenderSystem.applyProjectionMatrix(activeShadowMatrices.renderProjection());
+        VRenderSystem.calculateMVP();
+        org.joml.Matrix4fStack shadowModelViewStack = RenderSystem.getModelViewStack();
+        shadowModelViewStack.pushMatrix();
+        shadowModelViewStack.set(activeShadowMatrices.modelView());
+        PackShadowPipeline.update(shadow, null);
+        VTextureSelector.bindShaderTextures(shadow);
+
+        FeatureRenderDispatcherAccessor access = (FeatureRenderDispatcherAccessor) (Object) this.featureRenderDispatcher;
+        var bufferSource = access.vulkanmod$getBufferSource();
+        var outlineBufferSource = access.vulkanmod$getOutlineBufferSource();
+        var crumblingBufferSource = access.vulkanmod$getCrumblingBufferSource();
+        int collections = 0;
+        PackDebug.setEntityShadowDraws(0);
+        PackShadowPipeline.beginEntityShadowPass();
+        try {
+            for (SubmitNodeCollection collection : this.featureRenderDispatcher.getSubmitNodeStorage()
+                    .getSubmitsPerOrder().values()) {
+                // Render the actual entity/model geometry in light space. The
+                // vanilla shadow renderer only emits a projected ground blob;
+                // it cannot populate Complementary's directional shadow map
+                // for the player, mobs, armor, or held items.
+                access.vulkanmod$getModelFeatureRenderer().renderSolid(
+                        collection, bufferSource, outlineBufferSource, crumblingBufferSource);
+                access.vulkanmod$getModelPartFeatureRenderer().renderSolid(
+                        collection, bufferSource, outlineBufferSource, crumblingBufferSource);
+                access.vulkanmod$getItemFeatureRenderer().renderSolid(
+                        collection, bufferSource, outlineBufferSource);
+                access.vulkanmod$getModelFeatureRenderer().renderTranslucent(
+                        collection, bufferSource, outlineBufferSource, crumblingBufferSource);
+                access.vulkanmod$getModelPartFeatureRenderer().renderTranslucent(
+                        collection, bufferSource, outlineBufferSource, crumblingBufferSource);
+                access.vulkanmod$getItemFeatureRenderer().renderTranslucent(
+                        collection, bufferSource, outlineBufferSource);
+                collections++;
+            }
+            bufferSource.endBatch();
+        } finally {
+            PackShadowPipeline.endEntityShadowPass();
+            shadowModelViewStack.popMatrix();
+            PackFramebuffers.endShadow(Renderer.getCommandBuffer());
+            try (MemoryStack stack = MemoryStack.stackPush()) {
+                PackFramebuffers.copyShadowDepthToSecondary(Renderer.getCommandBuffer(), stack);
+                PackFramebuffers.transitionShadowsToRead(Renderer.getCommandBuffer(), stack);
+            }
+        }
+        if (lastCameraModelView != null && lastCameraProjection != null) {
+            VRenderSystem.applyMVP(lastCameraModelView, lastCameraProjection);
+            Renderer.getInstance().getMainPass().rebindMainTarget();
+        }
+        PackDebug.setEntityShadowCollections(collections);
+    }
+
+    private void renderPackSky(Matrix4f modelView, Matrix4f projection, Matrix4f cleanProjection) {
+        Renderer renderer = Renderer.getInstance();
+        GraphicsPipeline sky = PipelineManager.getPackSkyShader();
+        if (sky == null) return;
+        PackDebug.log("sky pass begin");
+        renderer.endRenderPass();
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            PackFramebuffers.beginSky(Renderer.getCommandBuffer(), stack);
+        }
+        // GraphicsPipeline lazily creates a Vulkan variant from the current
+        // GL-derived state at bind time. Set the fullscreen state before the
+        // first bind; setting it only while creating PackSkyPipeline is not
+        // sufficient because the actual variant may be created here.
+        GlStateManager._disableCull();
+        GlStateManager._disableDepthTest();
+        GlStateManager._depthMask(false);
+        GlStateManager._disableBlend();
+        VRenderSystem.setPrimitiveTopologyGL(GL11.GL_TRIANGLES);
+        renderer.bindGraphicsPipeline(sky);
+        VTextureSelector.bindShaderTextures(sky);
+        VRenderSystem.applyMVP(modelView, projection);
+        PackSkyPipeline.update(sky, cleanProjection);
+        renderer.uploadAndBindUBOs(sky);
+        QuadRenderer.renderQuad(Renderer.getCommandBuffer());
+        PackFramebuffers.endSky(Renderer.getCommandBuffer());
     }
 
     private void sortTranslucentSections(double camX, double camY, double camZ) {
@@ -534,6 +906,15 @@ public class WorldRenderer {
         }
     }
 
+    private static String shaderDimension(ClientLevel level) {
+        String path = level.dimension().identifier().getPath();
+        return switch (path) {
+            case "the_nether", "nether" -> "world-1";
+            case "the_end", "end" -> "world1";
+            default -> "world0";
+        };
+    }
+
     public void resetSampler() {
         this.terrainSampler = 0L;
     }
@@ -615,6 +996,11 @@ public class WorldRenderer {
 
     public static WorldRenderer getInstance() {
         return INSTANCE;
+    }
+
+    /** Light-space state for the camera G-buffer and immediate entity draws. */
+    public static PackShadowMatrices.State getActiveShadowMatrices() {
+        return INSTANCE == null ? null : INSTANCE.activeShadowMatrices;
     }
 
     public static ClientLevel getLevel() {

@@ -4,6 +4,7 @@ import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.systems.CommandEncoder;
 import com.mojang.blaze3d.textures.GpuTexture;
 import net.minecraft.client.Minecraft;
+import net.vulkanmod.render.shader.PipelineManager;
 import net.vulkanmod.render.texture.ImageUploadHelper;
 import net.vulkanmod.vulkan.Renderer;
 import org.lwjgl.opengl.GL11;
@@ -19,6 +20,7 @@ public class MinecraftMixin {
 
     @Inject(method = "renderFrame", at = @At(value = "HEAD"))
     private void preFrameOps(boolean advanceGameTime, CallbackInfo ci) {
+        PipelineManager.ensurePackMainPassForFrame();
         Renderer.getInstance().beginFrame();
         ImageUploadHelper.INSTANCE.submitCommands();
     }

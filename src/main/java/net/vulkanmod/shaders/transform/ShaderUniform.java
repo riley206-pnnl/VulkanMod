@@ -15,6 +15,10 @@ public record ShaderUniform(
         return kind == UniformKind.SAMPLER;
     }
 
+    public boolean isImage() {
+        return kind == UniformKind.IMAGE;
+    }
+
     public boolean hasUboLayout() {
         return kind == UniformKind.VALUE;
     }

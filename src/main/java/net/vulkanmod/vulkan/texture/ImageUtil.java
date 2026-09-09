@@ -192,8 +192,8 @@ public abstract class ImageUtil {
 
                 VkImageMemoryBarrier.Buffer barrier = VkImageMemoryBarrier.calloc(1, stack);
                 barrier.sType(VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER);
-                barrier.oldLayout(VK_IMAGE_USAGE_TRANSFER_DST_BIT);
-                barrier.newLayout(VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
+                barrier.oldLayout(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+                barrier.newLayout(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
                 barrier.srcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED);
                 barrier.dstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED);
                 barrier.image(image.getId());
@@ -234,7 +234,7 @@ public abstract class ImageUtil {
 
             VkImageMemoryBarrier.Buffer barrier = VkImageMemoryBarrier.calloc(1, stack);
             barrier.sType(VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER);
-            barrier.oldLayout(VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
+            barrier.oldLayout(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
             barrier.newLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
             barrier.srcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED);
             barrier.dstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED);
@@ -247,21 +247,30 @@ public abstract class ImageUtil {
 
             barrier.subresourceRange().aspectMask(image.aspect);
 
-            barrier.srcAccessMask(VK_ACCESS_TRANSFER_WRITE_BIT);
+            // Mip levels below the final level are left in TRANSFER_SRC after
+            // their blit. Their producer access is therefore a transfer read,
+            // not a transfer write.
+            barrier.srcAccessMask(VK_ACCESS_TRANSFER_READ_BIT);
             barrier.dstAccessMask(VK_ACCESS_SHADER_READ_BIT);
 
             vkCmdPipelineBarrier(commandBuffer.getHandle(),
-                                 VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                                 VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                 VK_PIPELINE_STAGE_VERTEX_SHADER_BIT
+                                         | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+                                         | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                                  0,
                                  null, null,
                                  barrier);
 
-            barrier.oldLayout(VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+            barrier.oldLayout(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
             barrier.subresourceRange().baseMipLevel(image.mipLevels - 1);
             barrier.subresourceRange().levelCount(1);
 
             vkCmdPipelineBarrier(commandBuffer.getHandle(),
-                                 VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                                 VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                 VK_PIPELINE_STAGE_VERTEX_SHADER_BIT
+                                         | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+                                         | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                                  0,
                                  null, null,
                                  barrier);

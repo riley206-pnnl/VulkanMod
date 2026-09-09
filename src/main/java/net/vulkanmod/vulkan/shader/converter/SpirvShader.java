@@ -48,6 +48,7 @@ public record SpirvShader(
 
 				uniformBuffers.addAll(extractUniformBuffers(compiler, spvcResources, stack, spirv));
 				samplers.addAll(extractSamplers(compiler, spvcResources, stack, spirv));
+				rejectUnsupportedResources(compiler, spvcResources, stack, filename);
 				outputs.addAll(extractVariables(compiler, spvcResources, stack, spirv,
 				                                Spvc.SPVC_RESOURCE_TYPE_STAGE_OUTPUT));
 				inputs.addAll(extractVariables(compiler, spvcResources, stack, spirv,
@@ -58,6 +59,37 @@ public record SpirvShader(
 		}
 
 		return new SpirvShader(filename, spirv, uniformBuffers, samplers, outputs, inputs);
+	}
+
+	/**
+	 * Storage images and SSBOs are not represented by the current descriptor
+	 * model.  Previously they disappeared during reflection and the resulting
+	 * pipeline silently bound an incomplete descriptor set.  Fail this program
+	 * explicitly so the caller can apply its per-program fallback and the log
+	 * identifies the exact resource that needs backend support.
+	 */
+	private static void rejectUnsupportedResources(long compiler, long resources,
+	                                               MemoryStack stack, String filename)
+			throws ShaderCompileException {
+		for (int resourceType : new int[]{Spvc.SPVC_RESOURCE_TYPE_STORAGE_IMAGE,
+				Spvc.SPVC_RESOURCE_TYPE_STORAGE_BUFFER}) {
+			PointerBuffer pointer = stack.callocPointer(1);
+			PointerBuffer countPointer = stack.callocPointer(1);
+			long list = getResourceList(resources, resourceType, pointer, countPointer);
+			int count = (int) countPointer.get(0);
+			if (count == 0) continue;
+
+			var reflected = SpvcReflectedResource.create(list, count);
+			StringBuilder names = new StringBuilder();
+			for (int i = 0; i < count; i++) {
+				if (names.length() > 0) names.append(", ");
+				names.append(reflected.get(i).nameString());
+			}
+			String kind = resourceType == Spvc.SPVC_RESOURCE_TYPE_STORAGE_IMAGE
+					? "storage image" : "SSBO";
+			throw new ShaderCompileException("Unsupported " + kind + " resource(s) in "
+					+ filename + ": " + names);
+		}
 	}
 
 	private static List<SpirvShader.SpvUniformBuffer> extractUniformBuffers(long compiler, long resources,

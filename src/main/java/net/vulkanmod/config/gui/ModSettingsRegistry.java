@@ -27,6 +27,13 @@ public class ModSettingsRegistry {
         this.modEntries.add(entry);
     }
 
+    public void addModEntryFirst(ModSettingsEntry entry) {
+        var existing = new java.util.ArrayList<>(this.modEntries);
+        this.modEntries.clear();
+        this.modEntries.add(entry);
+        this.modEntries.addAll(existing);
+    }
+
     public Set<ModSettingsEntry> getModEntries() {
         return modEntries;
     }

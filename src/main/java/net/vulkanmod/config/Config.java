@@ -47,7 +47,8 @@ public class Config {
     }
 
     public boolean isShaderPackEnabled() {
-        return shaderPackEnabled;
+        // Iris support is shelved while the Beryl native backend is in use.
+        return false;
     }
 
     public void write() {

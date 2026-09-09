@@ -25,6 +25,8 @@ public class Device {
     public final VkPhysicalDeviceFeatures2 availableFeatures;
     public final VkPhysicalDeviceVulkan11Features availableFeatures11;
     public final VkPhysicalDeviceVulkan12Features availableFeatures12;
+    public final VkPhysicalDeviceDynamicRenderingFeaturesKHR availableDynamicRendering;
+    public final VkPhysicalDeviceSynchronization2FeaturesKHR availableSynchronization2;
 
     private final int vendorId;
     public final String vendorIdString;
@@ -70,10 +72,18 @@ public class Device {
         this.availableFeatures = VkPhysicalDeviceFeatures2.calloc().sType$Default();
 
         this.availableFeatures11 = VkPhysicalDeviceVulkan11Features.malloc().sType$Default();
-        this.availableFeatures.pNext(this.availableFeatures11);
-
         this.availableFeatures12 = VkPhysicalDeviceVulkan12Features.malloc().sType$Default();
-        this.availableFeatures.pNext(this.availableFeatures12);
+        this.availableDynamicRendering = VkPhysicalDeviceDynamicRenderingFeaturesKHR.malloc().sType$Default();
+        this.availableSynchronization2 = VkPhysicalDeviceSynchronization2FeaturesKHR.malloc().sType$Default();
+
+        // Keep one complete feature query chain. Repeatedly assigning
+        // VkPhysicalDeviceFeatures2.pNext() silently replaces the previous
+        // node, which used to leave Vulkan 1.1/1.2 and KHR feature results
+        // unqueried and made device creation diagnostics misleading.
+        this.availableFeatures.pNext(this.availableFeatures11.address());
+        this.availableFeatures11.pNext(this.availableFeatures12.address());
+        this.availableFeatures12.pNext(this.availableDynamicRendering.address());
+        this.availableDynamicRendering.pNext(this.availableSynchronization2.address());
 
         vkGetPhysicalDeviceFeatures2(this.physicalDevice, this.availableFeatures);
 

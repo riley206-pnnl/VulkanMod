@@ -1,6 +1,7 @@
 package net.vulkanmod;
 
 import net.vulkanmod.shaders.ShaderPack;
+import net.vulkanmod.shaders.ShaderPackConfig;
 import net.vulkanmod.shaders.pack.FolderShaderPack;
 import net.vulkanmod.shaders.pack.ShaderProperties;
 import net.vulkanmod.shaders.transform.ProcessedShader;
@@ -37,6 +38,7 @@ public class TestShaderPack {
         System.out.println("name=" + pack.getName() + " hasShaders=" + pack.hasShaders());
 
         ShaderProperties props = ShaderProperties.load(pack);
+        ShaderPackConfig config = ShaderPackConfig.load(pack);
         System.out.println("=== PASSES (" + dimension + ") ===");
         List<String> passes = ShaderProperties.passes(pack, dimension);
         System.out.println(passes);
@@ -53,7 +55,7 @@ public class TestShaderPack {
                 for (String name : names) {
                     String line = ">>> " + name;
                     try {
-                        runProgram(pack, name, dimension);
+                        runProgram(pack, config, name, dimension);
                         line += " OK";
                         ok++;
                     } catch (Throwable t) {
@@ -68,7 +70,7 @@ public class TestShaderPack {
             return;
         }
 
-        runProgram(pack, program, dimension);
+        runProgram(pack, config, program, dimension);
     }
 
     private static String summarize(Throwable t) {
@@ -78,14 +80,19 @@ public class TestShaderPack {
         return m.length() > 300 ? m.substring(0, 300) + "..." : m;
     }
 
-    private static void runProgram(ShaderPack pack, String program, String dimension) throws Exception {
+    private static void runProgram(ShaderPack pack, ShaderPackConfig config,
+                                   String program, String dimension) throws Exception {
         if (!pack.exists("shaders/" + dimension + "/" + program + ".vsh")
                 && !pack.exists("shaders/" + program + ".vsh")) {
             System.out.println("Program " + program + " not found; run with a valid name");
             return;
         }
 
-        ShaderProcessor processor = new ShaderProcessor(directTerrain);
+        // Use the same metadata/profile-aware processor as runtime. The
+        // previous smoke test omitted ShaderPackConfig, so alpha-test,
+        // profile defines, and other shaders.properties-controlled rewrites
+        // could pass the sweep while failing during actual pipeline creation.
+        ShaderProcessor processor = new ShaderProcessor(config, directTerrain);
 
         ProcessedShader vs = processor.process(new StageSource(pack, program, dimension, Stage.VERTEX, null));
         ProcessedShader fs = processor.process(new StageSource(pack, program, dimension, Stage.FRAGMENT, null));

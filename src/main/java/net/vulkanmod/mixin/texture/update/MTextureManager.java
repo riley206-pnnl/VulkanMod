@@ -22,7 +22,8 @@ public abstract class MTextureManager {
      */
     @Overwrite
     public void tick() {
-        if (!Initializer.CONFIG.textureAnimations)
+        if (!Initializer.CONFIG.textureAnimations
+                || Boolean.getBoolean("vulkanmod.disableTextureAnimation"))
             return;
 
         for (TickableTexture tickable : this.tickableTextures) {

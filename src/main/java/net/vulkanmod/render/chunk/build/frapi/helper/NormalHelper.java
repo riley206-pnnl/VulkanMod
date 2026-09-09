@@ -170,6 +170,8 @@ public abstract class NormalHelper {
 			normX /= l;
 			normY /= l;
 			normZ /= l;
+		} else if (q.getFacingDirection() != null) {
+			return packedNormalFromDirection(q.getFacingDirection());
 		}
 
 		return I32_SNorm.packNormal(normX, normY, normZ);

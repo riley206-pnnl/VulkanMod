@@ -27,6 +27,9 @@ public class GraphicsPipeline extends Pipeline {
 
     private final VertexFormat vertexFormat;
     private final VertexInputDescription vertexInputDescription;
+    protected final int[] colorAttachmentFormats;
+    protected final int depthAttachmentFormat;
+    private final boolean[] colorBlendDisabled;
 
     private long vertShaderModule = 0;
     private long fragShaderModule = 0;
@@ -37,6 +40,9 @@ public class GraphicsPipeline extends Pipeline {
         this.imageDescriptors = builder.imageDescriptors;
         this.pushConstants = builder.pushConstants;
         this.vertexFormat = builder.vertexFormat;
+        this.colorAttachmentFormats = builder.colorAttachmentFormats;
+        this.depthAttachmentFormat = builder.depthAttachmentFormat;
+        this.colorBlendDisabled = builder.colorBlendDisabled;
 
         this.vertexInputDescription = new VertexInputDescription(this.vertexFormat);
 
@@ -141,27 +147,58 @@ public class GraphicsPipeline extends Pipeline {
 
             // ===> COLOR BLENDING <===
 
-            VkPipelineColorBlendAttachmentState.Buffer colorBlendAttachment = VkPipelineColorBlendAttachmentState.calloc(1, stack);
-            colorBlendAttachment.colorWriteMask(state.colorMask_i);
-
-            if (PipelineState.BlendState.enable(state.blendState_i)) {
-                colorBlendAttachment.blendEnable(true);
-                colorBlendAttachment.srcColorBlendFactor(PipelineState.BlendState.getSrcRgbFactor(state.blendState_i));
-                colorBlendAttachment.dstColorBlendFactor(PipelineState.BlendState.getDstRgbFactor(state.blendState_i));
-                colorBlendAttachment.colorBlendOp(PipelineState.BlendState.blendOp(state.blendState_i));
-                colorBlendAttachment.srcAlphaBlendFactor(PipelineState.BlendState.getSrcAlphaFactor(state.blendState_i));
-                colorBlendAttachment.dstAlphaBlendFactor(PipelineState.BlendState.getDstAlphaFactor(state.blendState_i));
-                colorBlendAttachment.alphaBlendOp(PipelineState.BlendState.blendOp(state.blendState_i));
+            Framebuffer framebuffer = null;
+            if (state.renderPass != null) {
+                framebuffer = state.renderPass.getFramebuffer();
+            } else if (Renderer.getInstance().getMainPass() != null) {
+                framebuffer = Renderer.getInstance().getMainPass().getMainFramebuffer();
             }
-            else {
-                colorBlendAttachment.blendEnable(false);
+
+            int[] colorFormats;
+            if (this.colorAttachmentFormats != null && this.colorAttachmentFormats.length > 0) {
+                colorFormats = this.colorAttachmentFormats;
+            } else if (framebuffer != null) {
+                colorFormats = new int[]{ framebuffer.getFormat() };
+            } else {
+                colorFormats = new int[]{ Framebuffer.DEFAULT_FORMAT };
+            }
+
+            int depthFormat;
+            if (this.depthAttachmentFormat != -1) {
+                depthFormat = this.depthAttachmentFormat;
+            } else if (framebuffer != null) {
+                depthFormat = framebuffer.getDepthFormat();
+            } else {
+                depthFormat = 0;
+            }
+
+            int numAttachments = colorFormats.length;
+            VkPipelineColorBlendAttachmentState.Buffer colorBlendAttachments = VkPipelineColorBlendAttachmentState.calloc(numAttachments, stack);
+            for (int a = 0; a < numAttachments; ++a) {
+                VkPipelineColorBlendAttachmentState colorBlendAttachment = colorBlendAttachments.get(a);
+                colorBlendAttachment.colorWriteMask(state.colorMask_i);
+
+                boolean blendEnabled = PipelineState.BlendState.enable(state.blendState_i)
+                        && (colorBlendDisabled == null || a >= colorBlendDisabled.length || !colorBlendDisabled[a]);
+                if (blendEnabled) {
+                    colorBlendAttachment.blendEnable(true);
+                    colorBlendAttachment.srcColorBlendFactor(PipelineState.BlendState.getSrcRgbFactor(state.blendState_i));
+                    colorBlendAttachment.dstColorBlendFactor(PipelineState.BlendState.getDstRgbFactor(state.blendState_i));
+                    colorBlendAttachment.colorBlendOp(PipelineState.BlendState.blendOp(state.blendState_i));
+                    colorBlendAttachment.srcAlphaBlendFactor(PipelineState.BlendState.getSrcAlphaFactor(state.blendState_i));
+                    colorBlendAttachment.dstAlphaBlendFactor(PipelineState.BlendState.getDstAlphaFactor(state.blendState_i));
+                    colorBlendAttachment.alphaBlendOp(PipelineState.BlendState.blendOp(state.blendState_i));
+                }
+                else {
+                    colorBlendAttachment.blendEnable(false);
+                }
             }
 
             VkPipelineColorBlendStateCreateInfo colorBlending = VkPipelineColorBlendStateCreateInfo.calloc(stack);
             colorBlending.sType(VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO);
             colorBlending.logicOpEnable(PipelineState.LogicOpState.enable(state.logicOp_i));
             colorBlending.logicOp(PipelineState.LogicOpState.decodeFun(state.logicOp_i));
-            colorBlending.pAttachments(colorBlendAttachment);
+            colorBlending.pAttachments(colorBlendAttachments);
             colorBlending.blendConstants(stack.floats(0.0f, 0.0f, 0.0f, 0.0f));
 
             // ===> DYNAMIC STATES <===
@@ -203,15 +240,8 @@ public class GraphicsPipeline extends Pipeline {
                 VkPipelineRenderingCreateInfoKHR renderingInfo = VkPipelineRenderingCreateInfoKHR.calloc(stack);
                 renderingInfo.sType(KHRDynamicRendering.VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR);
 
-                Framebuffer framebuffer;
-                if (state.renderPass != null) {
-                    framebuffer = state.renderPass.getFramebuffer();
-                } else {
-                    framebuffer = Renderer.getInstance().getMainPass().getMainFramebuffer();
-                }
-
-                renderingInfo.pColorAttachmentFormats(stack.ints(framebuffer.getFormat()));
-                renderingInfo.depthAttachmentFormat(framebuffer.getDepthFormat());
+                renderingInfo.pColorAttachmentFormats(stack.ints(colorFormats));
+                renderingInfo.depthAttachmentFormat(depthFormat);
                 pipelineInfo.pNext(renderingInfo);
             }
 
@@ -321,8 +351,10 @@ public class GraphicsPipeline extends Pipeline {
             // emitted by ShaderProcessor, so only the five real attributes
             // are described here.
             int location = vertexFormat == CustomVertexFormat.TERRAIN
-                    ? switch (i) { case 0 -> 4; case 1 -> 6; case 2 -> 7; case 3 -> 8; case 4 -> 5; default -> i; }
-                    : i;
+                    ? switch (i) { case 0 -> 4; case 1 -> 0; case 2 -> 1; case 3 -> 6; case 4 -> 7; case 5 -> 8; case 6 -> 5; default -> i; }
+                    : (vertexFormat == CustomVertexFormat.QUAD
+                    ? switch (i) { case 0 -> 4; case 1 -> 7; default -> i; }
+                    : i);
             posDescription.location(location);
 
             VertexFormatElement formatElement = elements.get(i);
@@ -334,10 +366,14 @@ public class GraphicsPipeline extends Pipeline {
                 case 0 -> { // POSITION
                     switch (type) {
                         case FLOAT -> {
-                            posDescription.format(VK_FORMAT_R32G32B32_SFLOAT);
                             posDescription.offset(offset);
-
-                            offset += 12;
+                            if (elementCount == 4) {
+                                posDescription.format(VK_FORMAT_R32G32B32A32_SFLOAT);
+                                offset += 16;
+                            } else {
+                                posDescription.format(VK_FORMAT_R32G32B32_SFLOAT);
+                                offset += 12;
+                            }
                         }
                         case SHORT -> {
                             posDescription.format(VK_FORMAT_R16G16B16A16_SINT);
@@ -375,10 +411,14 @@ public class GraphicsPipeline extends Pipeline {
                 case 2, 3, 4 -> { // UV / UV0 / UV1 / UV2
                     switch (type) {
                         case FLOAT -> {
-                            posDescription.format(VK_FORMAT_R32G32_SFLOAT);
                             posDescription.offset(offset);
-
-                            offset += 8;
+                            if (elementCount == 4) {
+                                posDescription.format(VK_FORMAT_R32G32B32A32_SFLOAT);
+                                offset += 16;
+                            } else {
+                                posDescription.format(VK_FORMAT_R32G32_SFLOAT);
+                                offset += 8;
+                            }
                         }
                         case SHORT -> {
                             posDescription.format(VK_FORMAT_R16G16_SINT);
@@ -398,6 +438,12 @@ public class GraphicsPipeline extends Pipeline {
 
                             offset += 4;
                         }
+                        case BYTE -> {
+                            posDescription.format(VK_FORMAT_R8G8B8A8_SNORM);
+                            posDescription.offset(offset);
+
+                            offset += 4;
+                        }
                     }
                 }
 
@@ -408,29 +454,94 @@ public class GraphicsPipeline extends Pipeline {
                     offset += 4;
                 }
 
-                default -> { // GENERIC / OTHER
-                    if (type == VertexFormatElement.Type.SHORT && elementCount == 1) {
-                        posDescription.format(VK_FORMAT_R16_SINT);
-                        posDescription.offset(offset);
+                default -> { // GENERIC / OTHER (or custom mod attributes such as Distant Horizons)
+                    boolean norm = formatElement.normalized();
+                    int format = switch (type) {
+                        case FLOAT -> switch (elementCount) {
+                            case 1 -> VK_FORMAT_R32_SFLOAT;
+                            case 2 -> VK_FORMAT_R32G32_SFLOAT;
+                            case 3 -> VK_FORMAT_R32G32B32_SFLOAT;
+                            case 4 -> VK_FORMAT_R32G32B32A32_SFLOAT;
+                            default -> 0;
+                        };
+                        case UBYTE -> norm ? switch (elementCount) {
+                            case 1 -> VK_FORMAT_R8_UNORM;
+                            case 2 -> VK_FORMAT_R8G8_UNORM;
+                            case 3 -> VK_FORMAT_R8G8B8_UNORM;
+                            case 4 -> VK_FORMAT_R8G8B8A8_UNORM;
+                            default -> 0;
+                        } : switch (elementCount) {
+                            case 1 -> VK_FORMAT_R8_UINT;
+                            case 2 -> VK_FORMAT_R8G8_UINT;
+                            case 3 -> VK_FORMAT_R8G8B8_UINT;
+                            case 4 -> VK_FORMAT_R8G8B8A8_UINT;
+                            default -> 0;
+                        };
+                        case BYTE -> norm ? switch (elementCount) {
+                            case 1 -> VK_FORMAT_R8_SNORM;
+                            case 2 -> VK_FORMAT_R8G8_SNORM;
+                            case 3 -> VK_FORMAT_R8G8B8_SNORM;
+                            case 4 -> VK_FORMAT_R8G8B8A8_SNORM;
+                            default -> 0;
+                        } : switch (elementCount) {
+                            case 1 -> VK_FORMAT_R8_SINT;
+                            case 2 -> VK_FORMAT_R8G8_SINT;
+                            case 3 -> VK_FORMAT_R8G8B8_SINT;
+                            case 4 -> VK_FORMAT_R8G8B8A8_SINT;
+                            default -> 0;
+                        };
+                        case USHORT -> norm ? switch (elementCount) {
+                            case 1 -> VK_FORMAT_R16_UNORM;
+                            case 2 -> VK_FORMAT_R16G16_UNORM;
+                            case 3 -> VK_FORMAT_R16G16B16_UNORM;
+                            case 4 -> VK_FORMAT_R16G16B16A16_UNORM;
+                            default -> 0;
+                        } : switch (elementCount) {
+                            case 1 -> VK_FORMAT_R16_UINT;
+                            case 2 -> VK_FORMAT_R16G16_UINT;
+                            case 3 -> VK_FORMAT_R16G16B16_UINT;
+                            case 4 -> VK_FORMAT_R16G16B16A16_UINT;
+                            default -> 0;
+                        };
+                        case SHORT -> norm ? switch (elementCount) {
+                            case 1 -> VK_FORMAT_R16_SNORM;
+                            case 2 -> VK_FORMAT_R16G16_SNORM;
+                            case 3 -> VK_FORMAT_R16G16B16_SNORM;
+                            case 4 -> VK_FORMAT_R16G16B16A16_SNORM;
+                            default -> 0;
+                        } : switch (elementCount) {
+                            case 1 -> VK_FORMAT_R16_SINT;
+                            case 2 -> VK_FORMAT_R16G16_SINT;
+                            case 3 -> VK_FORMAT_R16G16B16_SINT;
+                            case 4 -> VK_FORMAT_R16G16B16A16_SINT;
+                            default -> 0;
+                        };
+                        case UINT -> switch (elementCount) {
+                            case 1 -> VK_FORMAT_R32_UINT;
+                            case 2 -> VK_FORMAT_R32G32_UINT;
+                            case 3 -> VK_FORMAT_R32G32B32_UINT;
+                            case 4 -> VK_FORMAT_R32G32B32A32_UINT;
+                            default -> 0;
+                        };
+                        case INT -> switch (elementCount) {
+                            case 1 -> VK_FORMAT_R32_SINT;
+                            case 2 -> VK_FORMAT_R32G32_SINT;
+                            case 3 -> VK_FORMAT_R32G32B32_SINT;
+                            case 4 -> VK_FORMAT_R32G32B32A32_SINT;
+                            default -> 0;
+                        };
+                    };
 
-                        offset += 2;
+                    if (format == 0) {
+                        throw new RuntimeException(String.format("Unknown format element id: %s type: %s count: %s normalized: %s", id, type, elementCount, norm));
                     }
-                    else if (type == VertexFormatElement.Type.INT && elementCount == 1) {
-                        posDescription.format(VK_FORMAT_R32_SINT);
-                        posDescription.offset(offset);
-
-                        offset += 4;
-                    }
-                    else if (type == VertexFormatElement.Type.FLOAT && elementCount == 1) {
-                        posDescription.format(VK_FORMAT_R32_SFLOAT);
-                        posDescription.offset(offset);
-
-                        offset += 4;
-                    }
-                    else {
-                        throw new RuntimeException(String.format("Unknown format element id: %s type: %s", id, type));
-                    }
+                    posDescription.format(format);
+                    offset += formatElement.byteSize();
                 }
+            }
+
+            if (posDescription.format() == 0) {
+                throw new IllegalStateException(String.format("Vertex format element VkFormat unset for id: %s type: %s in format %s", id, type, vertexFormat));
             }
 
             posDescription.offset(((VertexFormatMixed) (vertexFormat)).getOffset(i));

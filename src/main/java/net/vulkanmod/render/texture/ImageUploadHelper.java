@@ -17,7 +17,12 @@ public class ImageUploadHelper {
     }
 
     public void submitCommands() {
-        this.submitCommands(true);
+        // Image uploads use the graphics queue itself. Queue order already
+        // makes the upload visible to the following graphics submission, so
+        // do not signal/recycle a binary semaphore for every atlas update.
+        // Fence tracking is sufficient and avoids semaphore reuse hazards
+        // during resource reloads and animated-texture updates.
+        this.submitCommands(false);
     }
 
     public void submitCommands(boolean useSemaphore) {

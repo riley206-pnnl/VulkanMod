@@ -19,6 +19,11 @@ public interface ShaderPack extends Closeable {
     /** Read a UTF-8 text resource. Returns null if absent. */
     String getSource(String path) throws IOException;
 
+    /** Open an input stream to read a binary resource. Returns null if absent. */
+    default java.io.InputStream openStream(String path) throws IOException {
+        return null;
+    }
+
     /**
      * All files under the given directory, relative to pack root, forward slashes.
      * Only regular files; directories excluded.

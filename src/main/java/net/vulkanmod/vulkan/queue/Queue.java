@@ -191,6 +191,15 @@ public abstract class Queue {
             if (indices.computeFamily == VK_QUEUE_FAMILY_IGNORED)
                 throw new RuntimeException("Unable to find queue family with compute support.");
 
+            // Diagnostic mode only: force all logical queue wrappers onto the
+            // graphics family. This isolates queue ownership/semaphore bugs
+            // without changing the normal dedicated-queue configuration.
+            if (Boolean.getBoolean("vulkanmod.singleQueue")) {
+                Initializer.LOGGER.warn("vulkanmod.singleQueue enabled: using the graphics queue family for transfer and compute diagnostics");
+                indices.transferFamily = indices.graphicsFamily;
+                indices.computeFamily = indices.graphicsFamily;
+            }
+
             return indices;
         }
     }

@@ -214,7 +214,7 @@ public class SectionGraph {
                 scheduled++;
             }
         }
-        if (this.rebuildQueue.size() > 0) {
+        if (Boolean.getBoolean("vulkanmod.debugChunkReadiness") && this.rebuildQueue.size() > 0) {
             Initializer.LOGGER.info("VulkanMod scheduleRebuilds: queue={}, scheduled={}", this.rebuildQueue.size(), scheduled);
         }
         this.rebuildQueue.clear();

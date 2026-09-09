@@ -46,8 +46,9 @@ import static org.lwjgl.vulkan.VK12.VK_API_VERSION_1_2;
 
 public class Vulkan {
 
-        public static final boolean ENABLE_VALIDATION_LAYERS = false;
-//    public static final boolean ENABLE_VALIDATION_LAYERS = true;
+    /** Enable with -Dvulkanmod.validation=true for shader-pack acceptance runs. */
+    public static final boolean ENABLE_VALIDATION_LAYERS =
+            Boolean.getBoolean("vulkanmod.validation");
 
     public static final boolean DYNAMIC_RENDERING = true;
 
@@ -295,6 +296,18 @@ public class Vulkan {
 
                     VkDebugUtilsMessengerCreateInfoEXT debugCreateInfo = VkDebugUtilsMessengerCreateInfoEXT.calloc(stack);
                     Debug.populateDebugMessengerCreateInfo(debugCreateInfo);
+                    if (Boolean.getBoolean("vulkanmod.gpuValidation")) {
+                        // GPU-assisted validation catches descriptor indexing,
+                        // image/sampler, and shader memory errors at the draw
+                        // that causes them instead of reporting only a later
+                        // VK_ERROR_DEVICE_LOST from a fence wait.
+                        VkValidationFeaturesEXT validationFeatures = VkValidationFeaturesEXT.calloc(stack);
+                        validationFeatures.sType(EXTValidationFeatures.VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT);
+                        validationFeatures.pEnabledValidationFeatures(stack.ints(
+                                EXTValidationFeatures.VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT,
+                                EXTValidationFeatures.VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_RESERVE_BINDING_SLOT_EXT));
+                        debugCreateInfo.pNext(validationFeatures.address());
+                    }
                     createInfo.pNext(debugCreateInfo.address());
                 }
 

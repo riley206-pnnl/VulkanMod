@@ -22,6 +22,9 @@ public class TerrainBufferBuilder implements VertexConsumer {
     int vertices;
 
 	private long elementPtr;
+	private int packEntity;
+	private float packMidU;
+	private float packMidV;
 
     private VertexBuilder vertexBuilder;
 
@@ -62,12 +65,31 @@ public class TerrainBufferBuilder implements VertexConsumer {
     public void vertex(float x, float y, float z, int color, float u, float v, int light, int packedNormal) {
         final long ptr = this.bufferPtr + this.nextElementByte;
         this.vertexBuilder.vertex(ptr, x, y, z, color, u, v, light, packedNormal);
+        if (this.vertexBuilder instanceof VertexBuilder.PackVertexBuilder) {
+            // mc_Entity and mc_midTexCoord are distinct vec4 attributes.
+            MemoryUtil.memPutFloat(ptr + 12, this.packEntity);
+            MemoryUtil.memPutFloat(ptr + 16, 0.0f);
+            MemoryUtil.memPutFloat(ptr + 20, 0.0f);
+            MemoryUtil.memPutFloat(ptr + 24, 0.0f);
+            MemoryUtil.memPutFloat(ptr + 28, this.packMidU);
+            MemoryUtil.memPutFloat(ptr + 32, this.packMidV);
+            MemoryUtil.memPutFloat(ptr + 36, 0.0f);
+            MemoryUtil.memPutFloat(ptr + 40, 1.0f);
+        }
         this.endVertex();
+    }
+
+    public void setPackMaterial(int entity, float midU, float midV) {
+        this.packEntity = entity;
+        this.packMidU = midU;
+        this.packMidV = midV;
     }
 
     public void end() {
         if (this.vertexBuilder instanceof VertexBuilder.DefaultVertexBuilder) {
             VertexBuilder.DefaultVertexBuilder.completeQuadNormals(this.bufferPtr, this.vertices);
+        } else if (this.vertexBuilder instanceof VertexBuilder.PackVertexBuilder) {
+            VertexBuilder.PackVertexBuilder.completeQuadNormals(this.bufferPtr, this.vertices);
         }
     }
 

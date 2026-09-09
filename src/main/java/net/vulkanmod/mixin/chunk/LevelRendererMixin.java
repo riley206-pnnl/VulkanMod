@@ -27,6 +27,7 @@ import net.vulkanmod.vulkan.VRenderSystem;
 import org.joml.Matrix4f;
 import org.joml.Matrix4fc;
 import org.joml.Vector4f;
+import org.lwjgl.system.MemoryStack;
 import org.spongepowered.asm.mixin.*;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -42,7 +43,7 @@ public abstract class LevelRendererMixin {
     @Unique private WorldRenderer worldRenderer;
 
     @Unique double camX, camY, camZ;
-    @Unique Matrix4f modelView, projection;
+    @Unique Matrix4f modelView, projection, cleanProjection;
 
     @Inject(method = "<init>", at = @At("RETURN"))
     private void init(Minecraft minecraft, EntityRenderDispatcher entityRenderDispatcher,
@@ -106,6 +107,7 @@ public abstract class LevelRendererMixin {
         // GameRenderer adds view bobbing, hurt tilt and portal distortion after camera extraction.
         // Match the active projection used by entities and the sky, not the unmodified camera matrix.
         this.projection = new Matrix4f(VRenderSystem.getProjectionMatrix().buffer.asFloatBuffer());
+        this.cleanProjection = new Matrix4f(camera.projectionMatrix);
         this.camX = camera.pos.x;
         this.camY = camera.pos.y;
         this.camZ = camera.pos.z;
@@ -122,19 +124,68 @@ public abstract class LevelRendererMixin {
             Profiler profiler = Profiler.getMainProfiler();
             profiler.push("Opaque_terrain");
 
-            this.worldRenderer.renderSectionLayer(TerrainRenderType.SOLID, camX, camY, camZ, modelView, projection);
-            this.worldRenderer.renderSectionLayer(TerrainRenderType.CUTOUT, camX, camY, camZ, modelView, projection);
+            // When opaque layers are compacted, SOLID and CUTOUT geometry is
+            // uploaded into the CUTOUT buffer. Rendering SOLID here would
+            // find no vertex buffer and silently skip the entire terrain pass.
+            if (!net.vulkanmod.Initializer.CONFIG.uniqueOpaqueLayer) {
+                this.worldRenderer.renderSectionLayer(TerrainRenderType.SOLID, camX, camY, camZ, modelView, projection, cleanProjection);
+            }
+            this.worldRenderer.renderSectionLayer(TerrainRenderType.CUTOUT, camX, camY, camZ, modelView, projection, cleanProjection);
+
+            net.vulkanmod.compat.DistantHorizonsCompat.renderOpaqueLods();
+
+            if (net.vulkanmod.shaders.PackCompositePipeline.isActive()) {
+                net.vulkanmod.vulkan.Renderer.getInstance().endRenderPass();
+                net.vulkanmod.shaders.PackFramebuffers.copyDepthToDepthtex1(net.vulkanmod.vulkan.Renderer.getCommandBuffer());
+                net.vulkanmod.vulkan.Renderer.getInstance().getMainPass().rebindMainTarget();
+            }
         }
         else if (chunkSectionLayerGroup == ChunkSectionLayerGroup.TRANSLUCENT) {
             Profiler profiler = Profiler.getMainProfiler();
             profiler.pop();
             profiler.push("Translucent_terrain");
 
-            this.worldRenderer.renderSectionLayer(TerrainRenderType.TRANSLUCENT, camX, camY, camZ, modelView, projection);
+            net.vulkanmod.compat.DistantHorizonsCompat.renderTranslucentLods();
+
+            this.worldRenderer.renderSectionLayer(TerrainRenderType.TRANSLUCENT, camX, camY, camZ, modelView, projection, cleanProjection);
 
             profiler.pop();
         }
 
+    }
+
+    /** The feature dispatcher has already submitted entity/block-entity shadow
+     * pieces at this point, while the main G-buffer is still bound. Populate
+     * the pack shadow map immediately before those features are rendered. */
+    @Inject(method = "lambda$addMainPass$0",
+            at = @At(value = "INVOKE",
+                    target = "Lnet/minecraft/client/renderer/feature/FeatureRenderDispatcher;renderSolidFeatures()V",
+                    shift = At.Shift.BEFORE))
+    private void renderPackEntityShadows(CallbackInfo ci) {
+        if (net.vulkanmod.shaders.PackCompositePipeline.isActive()) {
+            this.worldRenderer.renderPackEntityShadows();
+        }
+    }
+
+    @Inject(method = "renderLevel", at = @At("RETURN"))
+    private void onRenderLevelReturn(CallbackInfo ci) {
+        if (net.vulkanmod.shaders.PackCompositePipeline.isActive()
+                && !Boolean.getBoolean("vulkanmod.disablePackComposite")) {
+            net.vulkanmod.shaders.PackCompositePipeline.render(net.vulkanmod.vulkan.Renderer.getCommandBuffer(), this.cleanProjection);
+        } else if (net.vulkanmod.shaders.PackCompositePipeline.isActive()
+                && Boolean.getBoolean("vulkanmod.disablePackComposite")) {
+            net.vulkanmod.Initializer.LOGGER.warn("Pack composite stage disabled by diagnostic property");
+            // Preserve the normal world-to-GUI target transition while
+            // isolating the composite shaders. Without this, PackMainPass
+            // would finish a frame with the G-buffer bound and then present
+            // a swapchain image that was never rendered to.
+            if (net.vulkanmod.vulkan.Renderer.getInstance().getMainPass()
+                    instanceof net.vulkanmod.shaders.PackMainPass packMainPass) {
+                try (MemoryStack stack = MemoryStack.stackPush()) {
+                    packMainPass.beginGuiPass(net.vulkanmod.vulkan.Renderer.getCommandBuffer(), stack);
+                }
+            }
+        }
     }
 
     /**

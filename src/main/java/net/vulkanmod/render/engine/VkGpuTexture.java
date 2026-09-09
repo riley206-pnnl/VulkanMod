@@ -93,12 +93,15 @@ public class VkGpuTexture extends GlTexture {
 
     public static TextureFormat textureFormat(int format) {
         return switch (format) {
-            case VK10.VK_FORMAT_R8G8B8A8_UNORM, VK10.VK_FORMAT_B8G8R8A8_UNORM, VK10.VK_FORMAT_R8G8B8A8_SRGB -> TextureFormat.RGBA8;
-            case VK10.VK_FORMAT_R8_UNORM -> TextureFormat.RED8;
-            case VK10.VK_FORMAT_D32_SFLOAT -> TextureFormat.DEPTH32;
+            case VK10.VK_FORMAT_R8G8B8A8_UNORM, VK10.VK_FORMAT_B8G8R8A8_UNORM, VK10.VK_FORMAT_R8G8B8A8_SRGB,
+                 VK10.VK_FORMAT_R16G16B16A16_SFLOAT, VK10.VK_FORMAT_R16G16B16A16_UNORM,
+                 VK10.VK_FORMAT_R32G32B32A32_SFLOAT, VK10.VK_FORMAT_A2B10G10R10_UNORM_PACK32 -> TextureFormat.RGBA8;
+            case VK10.VK_FORMAT_R8_UNORM, VK10.VK_FORMAT_R16_SFLOAT, VK10.VK_FORMAT_R32_SFLOAT -> TextureFormat.RED8;
+            case VK10.VK_FORMAT_R8_SINT, VK10.VK_FORMAT_R16_SINT, VK10.VK_FORMAT_R32_SINT -> TextureFormat.RED8I;
+            case VK10.VK_FORMAT_D32_SFLOAT, VK10.VK_FORMAT_D16_UNORM -> TextureFormat.DEPTH32;
             case VK10.VK_FORMAT_D24_UNORM_S8_UINT -> TextureFormat.DEPTH24_STENCIL8;
-            case VK10.VK_FORMAT_D32_SFLOAT_S8_UINT -> TextureFormat.DEPTH32_STENCIL8;
-            default -> null;
+            case VK10.VK_FORMAT_D32_SFLOAT_S8_UINT, VK10.VK_FORMAT_D16_UNORM_S8_UINT -> TextureFormat.DEPTH32_STENCIL8;
+            default -> TextureFormat.RGBA8;
         };
     }
 

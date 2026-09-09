@@ -261,19 +261,22 @@ public abstract class MutableQuadViewImpl extends QuadViewImpl implements QuadEm
 		tintIndex(quad.materialInfo().tintIndex());
 
 		int normal = quadView.getNormal();
+		Direction lightFace = quadView.lightFace();
+		if (normal == 0 && lightFace != null) {
+			normal = NormalHelper.packedNormalFromDirection(lightFace);
+		}
 		data[baseIndex + HEADER_FACE_NORMAL] = normal;
 		NormalHelper.unpackNormalTo(normal, faceNormal);
 
-		Direction lightFace = quadView.lightFace();
 		data[baseIndex + HEADER_BITS] = EncodingFormat.lightFace(data[baseIndex + HEADER_BITS], lightFace);
 		data[baseIndex + HEADER_BITS] = EncodingFormat.geometryFlags(data[baseIndex + HEADER_BITS], quadView.getFlags());
 
 		QuadFacing quadFacing = quadView.getQuadFacing();
-		if (quadFacing == null) {
-			quadFacing = QuadFacing.fromDirection(lightFace);
+		if (quadFacing == null || quadFacing == QuadFacing.UNDEFINED) {
+			quadFacing = lightFace != null ? QuadFacing.fromDirection(lightFace) : QuadFacing.UNDEFINED;
 		}
 		this.facing = quadFacing;
-		this.isGeometryInvalid = false;
+		this.isGeometryInvalid = (normal == 0);
 
 		int lightEmission = quad.materialInfo().lightEmission();
 

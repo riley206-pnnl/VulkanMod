@@ -162,4 +162,58 @@ public interface VertexBuilder {
         }
     }
 
+    /** Full pack terrain layout: position, entity id, mid UV, color, UV0,
+     * lightmap, and normal. The vanilla compressed builder remains unchanged. */
+    class PackVertexBuilder implements VertexBuilder {
+        private static final int VERTEX_SIZE = 64;
+
+        /** Recover face normals for modern BLOCK producers that omit setNormal(). */
+        public static void completeQuadNormals(long ptr, int vertexCount) {
+            for (int vertex = 0; vertex + 3 < vertexCount; vertex += 4) {
+                long q = ptr + (long) vertex * VERTEX_SIZE;
+                float dx0 = MemoryUtil.memGetFloat(q + 128) - MemoryUtil.memGetFloat(q);
+                float dy0 = MemoryUtil.memGetFloat(q + 132) - MemoryUtil.memGetFloat(q + 4);
+                float dz0 = MemoryUtil.memGetFloat(q + 136) - MemoryUtil.memGetFloat(q + 8);
+                float dx1 = MemoryUtil.memGetFloat(q + 192) - MemoryUtil.memGetFloat(q + 64);
+                float dy1 = MemoryUtil.memGetFloat(q + 196) - MemoryUtil.memGetFloat(q + 68);
+                float dz1 = MemoryUtil.memGetFloat(q + 200) - MemoryUtil.memGetFloat(q + 72);
+                float nx = dy0 * dz1 - dz0 * dy1;
+                float ny = dz0 * dx1 - dx0 * dz1;
+                float nz = dx0 * dy1 - dy0 * dx1;
+                float length = (float) Math.sqrt(nx * nx + ny * ny + nz * nz);
+                int normal = length > 0 && Float.isFinite(length)
+                        ? net.vulkanmod.render.vertex.format.I32_SNorm.packNormal(nx / length, ny / length, nz / length)
+                        : net.vulkanmod.render.vertex.format.I32_SNorm.packNormal(0.0f, 1.0f, 0.0f);
+                for (int i = 0; i < 4; i++) {
+                    long n = q + (long) i * VERTEX_SIZE + 60;
+                    if ((MemoryUtil.memGetInt(n) & 0xFFFFFF) == 0) MemoryUtil.memPutInt(n, normal);
+                }
+            }
+        }
+
+        public void vertex(long ptr, float x, float y, float z, int color, float u, float v, int light, int packedNormal) {
+            MemoryUtil.memPutFloat(ptr + 0, x);
+            MemoryUtil.memPutFloat(ptr + 4, y);
+            MemoryUtil.memPutFloat(ptr + 8, z);
+            // Entity and mid-texture metadata are filled by TerrainBufferBuilder.
+            MemoryUtil.memPutInt(ptr + 44, color);
+            MemoryUtil.memPutFloat(ptr + 48, u);
+            MemoryUtil.memPutFloat(ptr + 52, v);
+            MemoryUtil.memPutShort(ptr + 56, (short) (light & 0xFFFF));
+            MemoryUtil.memPutShort(ptr + 58, (short) ((light >>> 16) & 0xFFFF));
+            MemoryUtil.memPutInt(ptr + 60, packedNormal);
+        }
+
+        @Override public void position(long ptr, float x, float y, float z) {
+            MemoryUtil.memPutFloat(ptr, x); MemoryUtil.memPutFloat(ptr + 4, y); MemoryUtil.memPutFloat(ptr + 8, z);
+        }
+        @Override public void color(long ptr, int color) { MemoryUtil.memPutInt(ptr + 44, color); }
+        @Override public void uv(long ptr, float u, float v) { MemoryUtil.memPutFloat(ptr + 48, u); MemoryUtil.memPutFloat(ptr + 52, v); }
+        @Override public void light(long ptr, int light) {
+            MemoryUtil.memPutShort(ptr + 56, (short) (light & 0xFFFF));
+            MemoryUtil.memPutShort(ptr + 58, (short) ((light >>> 16) & 0xFFFF));
+        }
+        @Override public void normal(long ptr, int normal) { MemoryUtil.memPutInt(ptr + 60, normal); }
+        @Override public int getStride() { return VERTEX_SIZE; }
+    }
 }

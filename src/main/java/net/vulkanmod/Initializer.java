@@ -39,7 +39,7 @@ public class Initializer {
 		// Renderer initialization can happen before FMLClientSetupEvent. Load
 		// shader packs here so PipelineManager sees the selected pack when it
 		// constructs Vulkan pipelines.
-		ShaderPackManager.init(FMLPaths.GAMEDIR.get());
+		// External Iris packs are shelved; Beryl owns shader configuration.
 
 		modEventBus.addListener(this::onInitializeClient);
 	}

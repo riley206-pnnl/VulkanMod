@@ -22,11 +22,34 @@ neoForge {
         client {
             client()
             systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
-            systemProperty 'fml.earlydisplay', 'true'
+            // The early NeoForge loading window can prevent automated Vulkan
+            // validation runs from reaching the real client window. Keep it
+            // enabled by default, but allow a local diagnostic run to bypass
+            // that handoff without changing normal launcher behavior.
+            systemProperty 'fml.earlydisplay',
+                    project.findProperty('vulkanmod.noEarlyDisplay') == 'true' ? 'false' : 'true'
             systemProperty 'org.lwjgl.util.Debug', 'false'
             systemProperty 'org.lwjgl.util.DebugAllocator', 'false'
             // NeoForge initializes LWJGL before Minecraft's Main mixin runs.
             systemProperty 'org.lwjgl.system.stackSize', '256'
+            // Forward opt-in VulkanMod diagnostics to the actual Minecraft
+            // JVM.  Gradle's -D flags only configure the Gradle process, so
+            // shader probes otherwise appear enabled while the client still
+            // runs the normal final pass.
+            ['validation', 'gpuValidation', 'deviceFault', 'disableTextureAnimation', 'serializeQueue', 'singleQueue', 'debugPack', 'debugTime', 'debugRain', 'debugSky', 'disablePackRuntime', 'disablePackReload', 'disablePackMainPass', 'disablePackFramebuffers', 'disablePackGBuffer', 'disablePackSky', 'disablePackShadow', 'disablePackComposite', 'disablePackTextureUploads', 'dumpPackTerrainVertex', 'debugTerrainNoSectionOffset', 'debugChunkReadiness', 'debugShadowColor', 'debugShadowDepthAlways', 'debugShadowDirect', 'debugShadowRaw', 'debugShadowBounds', 'debugShadowDraws', 'debugPackTextures',
+             'debugTerrainColor', 'debugTerrainTexture', 'debugTerrainColorInput', 'debugTerrainLightmap',
+             'debugTerrainNormal',
+             'shaderProfile'].each { key ->
+                def propertyName = "vulkanmod.${key}"
+                if (project.hasProperty(propertyName)) {
+                    systemProperty propertyName, project.property(propertyName).toString()
+                }
+            }
+
+            if (project.hasProperty('quickplay')) {
+                programArgument '--quickPlaySingleplayer'
+                programArgument project.property('quickplay').toString()
+            }
         }
 
         server {
@@ -194,5 +217,25 @@ tasks.register('runBigSource', JavaExec) {
 // NeoForge provides Minecraft/JOML on the main compile classpath only.
 sourceSets.test.compileClasspath += sourceSets.main.compileClasspath
 tasks.named('test') {
+    inputs.dir('src/beryl/resources/assets/beryl/shaders')
     classpath += sourceSets.main.compileClasspath
 }
+
+// Local NeoForge adaptation of the user-supplied Beryl artifact. Kept in a
+// separate source set and jar so its assets/license remain distinct.
+sourceSets {
+    beryl {
+        compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
+        runtimeClasspath += sourceSets.main.output + sourceSets.main.runtimeClasspath
+    }
+}
+neoForge.mods {
+    beryl { sourceSet sourceSets.beryl }
+}
+tasks.register('berylJar', Jar) {
+    dependsOn tasks.named('berylClasses')
+    archiveBaseName = 'Beryl-NeoForge'
+    archiveVersion = '0.2.1-alpha-local'
+    from sourceSets.beryl.output
+}
+tasks.named('assemble') { dependsOn tasks.named('berylJar') }

@@ -17,6 +17,7 @@ public class ChunkStatusMap {
     }
 
     private final Long2ByteOpenHashMap map;
+    private boolean readinessLogged;
 
     public ChunkStatusMap(int renderDistance) {
         int diameter = renderDistance * 2 + 1;
@@ -87,13 +88,41 @@ public class ChunkStatusMap {
     }
 
     public boolean chunkRenderReady(int x, int z) {
-        // Bypass status map - check directly if chunk is loaded in ClientLevel
+        // The client cache can briefly report a missing FULL chunk while the
+        // packet callbacks have already completed DATA and LIGHT delivery.
+        // That race used to strand the section rebuild queue with zero
+        // scheduled tasks, leaving the shader scene as sky-only.  Accept the
+        // tracked packet state as the readiness contract, while retaining the
+        // cache query for worlds whose callbacks are not available.
+        byte status = map.get(ChunkPos.pack(x, z));
+        boolean statusReady = (status & CHUNK_READY) == CHUNK_READY;
+        if (statusReady)
+            return true;
+
         net.minecraft.world.level.Level level = WorldRenderer.getLevel();
         if (level instanceof net.minecraft.client.multiplayer.ClientLevel clientLevel) {
             var chunkSource = clientLevel.getChunkSource();
-            return chunkSource.hasChunk(x, z);
+            boolean cacheReady = chunkSource.hasChunk(x, z);
+            if (Boolean.getBoolean("vulkanmod.debugChunkReadiness") && !readinessLogged) {
+                readinessLogged = true;
+                net.vulkanmod.Initializer.LOGGER.info(
+                        "[chunkdbg] request=({}, {}) status={} statusReady={} cacheReady={} loadedChunks={}",
+                        x, z, status & 0xFF, statusReady, cacheReady,
+                        chunkSource.getLoadedChunksCount());
+            }
+            return cacheReady;
+        }
+        if (Boolean.getBoolean("vulkanmod.debugChunkReadiness") && !readinessLogged) {
+            readinessLogged = true;
+            net.vulkanmod.Initializer.LOGGER.info(
+                    "[chunkdbg] request=({}, {}) status={} statusReady={} level=none",
+                    x, z, status & 0xFF, statusReady);
         }
         return false;
+    }
+
+    public byte status(int x, int z) {
+        return map.get(ChunkPos.pack(x, z));
     }
 
     public void reset() {

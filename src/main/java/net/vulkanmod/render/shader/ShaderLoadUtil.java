@@ -20,6 +20,13 @@ import java.util.List;
 import java.util.Set;
 
 public abstract class ShaderLoadUtil {
+    private static final java.util.Map<String, Class<?>> RESOURCE_OWNERS = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Register a companion mod's resource owner for NeoForge's module loader. */
+    public static void registerResourceOwner(String namespace, Class<?> owner) {
+        RESOURCE_OWNERS.put(namespace, owner);
+    }
+
 
     public static final String RESOURCES_PATH = "/assets/vulkanmod";
     public static final String SHADERS_PATH = "%s/shaders/".formatted(RESOURCES_PATH);
@@ -248,8 +255,10 @@ public abstract class ShaderLoadUtil {
 
     public static InputStream getInputStream(String path) {
         // NeoForge exposes resource files, but need not expose directory URLs.
-        if (path.startsWith(RESOURCES_PATH + "/")) {
-            return ShaderLoadUtil.class.getResourceAsStream(path);
+        if (path.startsWith("/assets/")) {
+            String namespace = path.substring(8).split("/", 2)[0];
+            Class<?> owner = RESOURCE_OWNERS.getOrDefault(namespace, ShaderLoadUtil.class);
+            return owner.getResourceAsStream(path);
         }
         try {
             var path1 = Paths.get(new URI(path));

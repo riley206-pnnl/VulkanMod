@@ -1,5 +1,6 @@
 package net.vulkanmod.vulkan.shader.descriptor;
 
+import net.vulkanmod.shaders.PackDebug;
 import net.vulkanmod.vulkan.texture.VTextureSelector;
 import net.vulkanmod.vulkan.texture.VulkanImage;
 
@@ -17,6 +18,7 @@ public class ImageDescriptor implements Descriptor {
     public boolean isReadOnlyLayout;
     private int layout;
     private int mipLevel = -1;
+    private VulkanImage customImage;
 
     public ImageDescriptor(int binding, String type, String name, int imageIdx, int descriptorType) {
         this.binding = binding;
@@ -68,7 +70,15 @@ public class ImageDescriptor implements Descriptor {
     }
 
     public VulkanImage getImage() {
-        return VTextureSelector.getImage(this.imageIdx);
+        if (customImage == null && imageIdx == VTextureSelector.SIZE - 1) {
+            PackDebug.resourceFallback(name, "unmapped shader resource");
+        }
+        return customImage != null ? customImage : VTextureSelector.getImage(this.imageIdx);
+    }
+
+    /** Bind an Iris custom texture for this program without changing its global sampler alias. */
+    public void setCustomImage(VulkanImage image) {
+        this.customImage = image;
     }
 
     public long getImageView(VulkanImage image) {
@@ -84,6 +94,42 @@ public class ImageDescriptor implements Descriptor {
 
     public boolean isStorageImage() {
         return this.descriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    }
+
+    /** Shadow samplers need a comparison sampler, while the same Iris shadow
+     * image is also exposed as raw depth to blocker-search/composite passes. */
+    public boolean isComparisonSampler() {
+        return (qualifier != null && qualifier.toLowerCase().contains("shadow"))
+                || ("ShadowMap".equalsIgnoreCase(name) || "ShadowMap1".equalsIgnoreCase(name));
+    }
+
+    /**
+     * Merge declarations from both shader stages. Iris packs sometimes
+     * declare the same shadow image once as sampler2D (raw depth) and once as
+     * sampler2DShadow (comparison lookup), reusing one binding. Vulkan keeps
+     * the comparison operation in the sampler object, so retaining the first
+     * declaration can accidentally bind a non-comparison sampler to a shadow
+     * lookup. Prefer the stricter resource contract when declarations collide.
+     */
+    public static ImageDescriptor prefer(ImageDescriptor existing,
+                                         ImageDescriptor candidate) {
+        return prefer(existing, candidate, false);
+    }
+
+    /** Merge with the one Complementary exception: composite1 deliberately
+     * reads shadowtex0 as raw depth for its blocker search. */
+    public static ImageDescriptor prefer(ImageDescriptor existing,
+                                         ImageDescriptor candidate,
+                                         boolean preferRawShadowDepth) {
+        if (existing == null) return candidate;
+        if (preferRawShadowDepth && "shadowtex0".equals(candidate.name)
+                && "shadowtex0".equals(existing.name)) {
+            if (!candidate.isComparisonSampler() && existing.isComparisonSampler()) return candidate;
+            if (!existing.isComparisonSampler() && candidate.isComparisonSampler()) return existing;
+        }
+        if (candidate.isStorageImage() && !existing.isStorageImage()) return candidate;
+        if (candidate.isComparisonSampler() && !existing.isComparisonSampler()) return candidate;
+        return existing;
     }
 
     @Override

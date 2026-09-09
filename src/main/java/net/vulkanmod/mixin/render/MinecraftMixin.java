@@ -49,7 +49,7 @@ public class MinecraftMixin {
     @Inject(method = "runTick", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/Minecraft;tick()V"))
     private void redirectResourceTick(boolean bl, CallbackInfo ci, @Local(ordinal = 0) int i, @Local(ordinal = 1) int j) {
         int n = Math.min(10, i) - 1;
-        boolean doUpload = j == n;
+        boolean doUpload = !Boolean.getBoolean("vulkanmod.disableTextureAnimation") && j == n;
         SpriteUpdateUtil.setDoUpload(doUpload);
     }
 

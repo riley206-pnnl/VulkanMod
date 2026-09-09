@@ -79,8 +79,9 @@ public abstract class Pipeline {
 
             VkDescriptorSetLayoutBinding.Buffer bindings = VkDescriptorSetLayoutBinding.calloc(bindingsSize, stack);
 
+            int bindingIdx = 0;
             for (UBO ubo : this.buffers) {
-                VkDescriptorSetLayoutBinding uboLayoutBinding = bindings.get(ubo.getBinding());
+                VkDescriptorSetLayoutBinding uboLayoutBinding = bindings.get(bindingIdx++);
                 uboLayoutBinding.binding(ubo.getBinding());
                 uboLayoutBinding.descriptorCount(1);
                 uboLayoutBinding.descriptorType(ubo.getType());
@@ -89,7 +90,7 @@ public abstract class Pipeline {
             }
 
             for (ImageDescriptor imageDescriptor : this.imageDescriptors) {
-                VkDescriptorSetLayoutBinding samplerLayoutBinding = bindings.get(imageDescriptor.getBinding());
+                VkDescriptorSetLayoutBinding samplerLayoutBinding = bindings.get(bindingIdx++);
                 samplerLayoutBinding.binding(imageDescriptor.getBinding());
                 samplerLayoutBinding.descriptorCount(1);
                 samplerLayoutBinding.descriptorType(imageDescriptor.getType());
@@ -405,6 +406,27 @@ public abstract class Pipeline {
 
         public Map<ShaderKind, String> getShadersSrc() {
             return shadersSrc;
+        }
+
+        int[] colorAttachmentFormats = null;
+        int depthAttachmentFormat = -1;
+        boolean[] colorBlendDisabled = null;
+
+        public Builder setColorAttachmentFormats(int... formats) {
+            this.colorAttachmentFormats = formats;
+            return this;
+        }
+
+        public Builder setDepthAttachmentFormat(int format) {
+            this.depthAttachmentFormat = format;
+            return this;
+        }
+
+        /** Disable blending for selected MRT attachment slots while keeping
+         * the dynamic blend state for the remaining slots. */
+        public Builder setColorBlendDisabled(boolean... disabled) {
+            this.colorBlendDisabled = disabled;
+            return this;
         }
 
         public GraphicsPipeline createGraphicsPipeline() {

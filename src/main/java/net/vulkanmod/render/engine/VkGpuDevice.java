@@ -135,6 +135,9 @@ public class VkGpuDevice implements GpuDeviceBackend {
         VkGlTexture glTexture = VkGlTexture.getTexture(id);
         glTexture.setVulkanImage(image);
         TextureFormat textureFormat = VkGpuTexture.textureFormat(image.format);
+        if (textureFormat == null) {
+            textureFormat = TextureFormat.RGBA8;
+        }
         int usage = 0;
         if ((image.usage & VK10.VK_IMAGE_USAGE_TRANSFER_DST_BIT) != 0) usage |= GpuTexture.USAGE_COPY_DST;
         if ((image.usage & VK10.VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0) usage |= GpuTexture.USAGE_COPY_SRC;

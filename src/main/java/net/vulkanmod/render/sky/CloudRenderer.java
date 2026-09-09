@@ -11,10 +11,13 @@ import net.minecraft.server.packs.resources.Resource;
 import net.minecraft.server.packs.resources.ResourceManager;
 import net.minecraft.util.Mth;
 import net.vulkanmod.render.shader.PipelineManager;
+import net.vulkanmod.shaders.PackFramebuffers;
+import net.vulkanmod.shaders.PackTerrainPipeline;
 import net.vulkanmod.render.VBO;
 import net.vulkanmod.vulkan.Renderer;
 import net.vulkanmod.vulkan.VRenderSystem;
 import net.vulkanmod.vulkan.shader.GraphicsPipeline;
+import net.vulkanmod.vulkan.texture.VTextureSelector;
 import net.vulkanmod.vulkan.util.ColorUtil;
 import org.apache.commons.lang3.Validate;
 import org.joml.Matrix4fStack;
@@ -133,7 +136,21 @@ public class CloudRenderer {
         float b = ColorUtil.ARGB.unpackB(cloudColor);
         VRenderSystem.setShaderColor(r, g, b, 0.8f);
 
-        GraphicsPipeline pipeline = PipelineManager.getCloudsPipeline();
+        GraphicsPipeline packPipeline = PipelineManager.getPackCloudShader();
+        boolean packClouds = packPipeline != null;
+        GraphicsPipeline pipeline = packClouds ? packPipeline : PipelineManager.getCloudsPipeline();
+        if (packClouds) {
+            Renderer.getInstance().endRenderPass();
+            try (org.lwjgl.system.MemoryStack stack = org.lwjgl.system.MemoryStack.stackPush()) {
+                PackFramebuffers.beginTerrainMRT(Renderer.getCommandBuffer(), stack,
+                        PackTerrainPipeline.getDrawBuffers(packPipeline));
+            }
+            var cloudTexture = minecraft.getTextureManager().getTexture(TEXTURE_LOCATION).getTextureView();
+            VRenderSystem.setShaderTexture(0, cloudTexture);
+            VTextureSelector.bindShaderTextures(packPipeline);
+            PackTerrainPipeline.update(packPipeline);
+            Renderer.getInstance().uploadAndBindUBOs(packPipeline);
+        }
         VRenderSystem.enableBlend();
         VRenderSystem.glBlendFuncSeparate(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA, GL11.GL_ONE, GL11.GL_ZERO);
         VRenderSystem.enableDepthTest();
@@ -167,6 +184,11 @@ public class CloudRenderer {
         this.cloudBuffer.bind(pipeline);
         this.cloudBuffer.draw();
 
+        if (packClouds) {
+            PackFramebuffers.endTerrainMRT(Renderer.getCommandBuffer());
+            Renderer.getInstance().getMainPass().rebindMainTarget();
+        }
+
         poseStack.popMatrix();
         VRenderSystem.enableCull();
         VRenderSystem.setShaderColor(1.0f, 1.0f, 1.0f, 1.0f);
@@ -186,7 +208,7 @@ public class CloudRenderer {
         final float downFaceBrightness = 0.7f;
         final float zDirBrightness = 0.8f;
 
-        BufferBuilder bufferBuilder = tesselator.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
+        BufferBuilder bufferBuilder = tesselator.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_TEX_COLOR);
 
         int cloudRange = Math.min(Minecraft.getInstance().options.cloudRange().get(), 128) * 16;
         int renderDistance = Mth.ceil(cloudRange / 12.0F);
@@ -281,7 +303,12 @@ public class CloudRenderer {
     }
 
     private static void putVertex(BufferBuilder bufferBuilder, float x, float y, float z, int color) {
-        bufferBuilder.addVertex(x, y, z).setColor(color);
+        // Use the cloud-grid coordinates as a repeating UV. This preserves
+        // the native cloud texture while giving gbuffers_clouds the
+        // texCoord expected by OptiFine/Iris packs.
+        bufferBuilder.addVertex(x, y, z)
+                .setUv(x / CELL_WIDTH, z / CELL_WIDTH)
+                .setColor(color);
     }
 
     private static CloudGrid createCloudGrid(Identifier textureLocation) {

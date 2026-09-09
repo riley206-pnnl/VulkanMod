@@ -131,6 +131,15 @@ public class VulkanImage {
         }
     }
 
+    public static VulkanImage createWhiteDepthTexture() {
+        return VulkanImage.builder(1, 1)
+                          .setFormat(VK_FORMAT_D32_SFLOAT)
+                          .setUsage(VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT)
+                          .setLinearFiltering(false)
+                          .setClamp(true)
+                          .createVulkanImage();
+    }
+
     private void createImage() {
         try (MemoryStack stack = stackPush()) {
             LongBuffer pTextureImage = stack.mallocLong(1);
@@ -294,6 +303,38 @@ public class VulkanImage {
 
     public void setSampler(long sampler) {
         this.sampler = sampler;
+    }
+
+    /** Return the sampler appropriate for one shader declaration.  A single
+     * Iris image may be consumed as raw depth and as sampler2DShadow by
+     * different programs, so comparison state cannot live only on the image. */
+    public long getSampler(boolean comparison) {
+        if (!comparison) {
+            if (this.sampler != 0L && !SamplerManager.isComparisonSampler(this.sampler)) {
+                return this.sampler;
+            }
+            return SamplerManager.getDefaultSampler();
+        }
+        if (this.sampler != 0L && SamplerManager.isComparisonSampler(this.sampler)) {
+            return this.sampler;
+        }
+        int filter = VK_FILTER_NEAREST;
+        return SamplerManager.getSampler(SamplerInfo.builder()
+                .setAddressMode(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER)
+                .setFiltering(filter, filter, VK_SAMPLER_MIPMAP_MODE_NEAREST)
+                .setCompare(true, VK_COMPARE_OP_LESS_OR_EQUAL)
+                .createSamplerInfo());
+    }
+
+    /** Assign a depth-comparison sampler for Iris/OptiFine shadow samplers. */
+    public void setComparisonSampler(boolean linear) {
+        int filter = linear ? VK_FILTER_LINEAR : VK_FILTER_NEAREST;
+        long comparison = SamplerManager.getSampler(SamplerInfo.builder()
+                .setAddressMode(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER)
+                .setFiltering(filter, filter, VK_SAMPLER_MIPMAP_MODE_NEAREST)
+                .setCompare(true, VK_COMPARE_OP_LESS_OR_EQUAL)
+                .createSamplerInfo());
+        this.sampler = comparison;
     }
 
     public void transitionImageLayout(MemoryStack stack, VkCommandBuffer commandBuffer, int newLayout) {

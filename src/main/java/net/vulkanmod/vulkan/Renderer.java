@@ -47,6 +47,7 @@ import static org.lwjgl.opengl.GL11.GL_DEPTH_BUFFER_BIT;
 import static org.lwjgl.system.MemoryStack.stackPush;
 import static org.lwjgl.vulkan.EXTDebugUtils.*;
 import static org.lwjgl.vulkan.KHRSwapchain.*;
+import static org.lwjgl.vulkan.EXTDeviceFault.*;
 import static org.lwjgl.vulkan.VK10.*;
 
 public class Renderer {
@@ -90,6 +91,8 @@ public class Renderer {
     private ArrayList<Long> imageAvailableSemaphores;
     private ArrayList<Long> renderFinishedSemaphores;
     private ArrayList<Long> inFlightFences;
+    /** Fence for the most recent submission that owns each swapchain image. */
+    private ArrayList<Long> imagesInFlight;
     private List<CommandPool.CommandBuffer> transferCbs;
 
     private Framebuffer boundFramebuffer;
@@ -181,6 +184,7 @@ public class Renderer {
         // only vkAcquireNextImageKHR can guarantee that, hence we need as many semaphores as swapchain images
         int swapChainImages = swapChain.getImagesNum();
         renderFinishedSemaphores = new ArrayList<>(swapChainImages);
+        imagesInFlight = new ArrayList<>(swapChainImages);
 
         imageAvailableSemaphores = new ArrayList<>(framesNum);
         inFlightFences = new ArrayList<>(framesNum);
@@ -210,6 +214,7 @@ public class Renderer {
             }
 
             for (int i = 0; i < swapChain.getImagesNum(); ++i) {
+                imagesInFlight.add(VK_NULL_HANDLE);
                 if (vkCreateSemaphore(device, semaphoreInfo, null, pRenderFinishedSemaphore) != VK_SUCCESS) {
 
                     throw new RuntimeException("Failed to create synchronization objects for the image: " + i);
@@ -249,7 +254,7 @@ public class Renderer {
         p.pop();
         p.push("Frame_fence");
 
-        vkWaitForFences(device, inFlightFences.get(currentFrame), true, VUtil.UINT64_MAX);
+        waitForFrameFence(currentFrame);
 
         p.pop();
         p.push("Begin_rendering");
@@ -289,6 +294,16 @@ public class Renderer {
                 }
 
                 imageIndex = pImageIndex.get(0);
+
+                // Waiting only on currentFrame's fence protects the command
+                // buffer for that frame, but does not prove that the image
+                // returned by acquire is no longer being presented from a
+                // previous frame. Track ownership per swapchain image before
+                // resetting/recording work that targets it.
+                long imageFence = imagesInFlight.get(imageIndex);
+                if (imageFence != VK_NULL_HANDLE && imageFence != inFlightFences.get(currentFrame)) {
+                    vkWaitForFences(device, imageFence, true, VUtil.UINT64_MAX);
+                }
                 swapChain.setAcquired(true);
             }
 
@@ -385,11 +400,24 @@ public class Renderer {
                 submitInfo.pSignalSemaphores(stack.longs(renderFinishedSemaphores.get(imageIndex)));
             }
 
-            vkResetFences(device, inFlightFences.get(currentFrame));
+            resetFrameFence(currentFrame);
 
             if ((vkResult = vkQueueSubmit(DeviceManager.getGraphicsQueue().vkQueue(), submitInfo, inFlightFences.get(currentFrame))) != VK_SUCCESS) {
+                // The submit failed, so leave the fence in a reusable state
+                // for the next diagnostic/recovery attempt.
                 vkResetFences(device, inFlightFences.get(currentFrame));
                 throw new RuntimeException("Failed to submit draw command buffer: %s".formatted(VkResult.decode(vkResult)));
+            }
+
+            if (Boolean.getBoolean("vulkanmod.serializeQueue")) {
+                int idleResult = vkQueueWaitIdle(DeviceManager.getGraphicsQueue().vkQueue());
+                if (idleResult != VK_SUCCESS) {
+                    throw new RuntimeException("Failed waiting for graphics queue: %s".formatted(VkResult.decode(idleResult)));
+                }
+            }
+
+            if (swapChain.isAcquired()) {
+                imagesInFlight.set(imageIndex, inFlightFences.get(currentFrame));
             }
 
             // Semaphore waited command buffers will be reset right after waiting this command buffer's fence
@@ -437,12 +465,20 @@ public class Renderer {
             int vkResult;
 
             this.endRenderPass(currentCmdBuffer);
-            vkEndCommandBuffer(currentCmdBuffer);
+            int endResult = vkEndCommandBuffer(currentCmdBuffer);
+            if (endResult != VK_SUCCESS) {
+                throw new RuntimeException("Failed to end flushed command buffer: %s".formatted(VkResult.decode(endResult)));
+            }
 
             VkSubmitInfo submitInfo = VkSubmitInfo.calloc(stack);
             submitInfo.sType(VK_STRUCTURE_TYPE_SUBMIT_INFO);
 
             submitInfo.pCommandBuffers(stack.pointers(currentCmdBuffer));
+
+            // Uploads queued while this command buffer was being recorded
+            // must be submitted before collecting the semaphore waits.  The
+            // waits are consumed below to build this graphics submission.
+            submitUploads();
 
             int waitSemaphoreCount = Synchronization.INSTANCE.getWaitSemaphoreCount();
 
@@ -462,16 +498,24 @@ public class Renderer {
             submitInfo.waitSemaphoreCount(waitSemaphores.limit());
             submitInfo.pWaitDstStageMask(waitDstStageMask);
 
-            submitUploads();
             waitFences();
 
-            vkResetFences(device, inFlightFences.get(currentFrame));
+            resetFrameFence(currentFrame);
             if ((vkResult = vkQueueSubmit(DeviceManager.getGraphicsQueue().vkQueue(), submitInfo, inFlightFences.get(currentFrame))) != VK_SUCCESS) {
                 vkResetFences(device, inFlightFences.get(currentFrame));
                 throw new RuntimeException("Failed to submit draw command buffer: %s".formatted(VkResult.decode(vkResult)));
             }
 
             vkWaitForFences(device, inFlightFences.get(currentFrame), true, VUtil.UINT64_MAX);
+
+            // A submitted command buffer is executable, not recording. Reset
+            // it before beginning the continuation command buffer after a
+            // flush; omitting this reset violates the command-buffer state
+            // machine and can surface as a delayed device loss on NVIDIA.
+            int resetResult = vkResetCommandBuffer(currentCmdBuffer, 0);
+            if (resetResult != VK_SUCCESS) {
+                throw new RuntimeException("Failed resetting flushed command buffer: %s".formatted(VkResult.decode(resetResult)));
+            }
 
             this.beginMainRenderPass(stack);
         }
@@ -548,6 +592,61 @@ public class Renderer {
         Vulkan.getStagingBuffer().reset();
     }
 
+    private void waitForFrameFence(int frame) {
+        int result = vkWaitForFences(device, inFlightFences.get(frame), true, VUtil.UINT64_MAX);
+        if (result != VK_SUCCESS) {
+            if (result == VK_ERROR_DEVICE_LOST) {
+                // Some NVIDIA driver versions expose VK_EXT_device_fault but
+                // crash inside vkGetDeviceFaultInfoEXT when called after a
+                // lost fence. Keep the probe opt-in so diagnostics cannot
+                // replace the original device-loss evidence with a native
+                // segfault.
+                if (Boolean.getBoolean("vulkanmod.deviceFault")) {
+                    reportDeviceFault();
+                } else {
+                    Initializer.LOGGER.error("VK_ERROR_DEVICE_LOST while waiting for frame fence (device-fault query disabled)");
+                }
+            }
+            throw new RuntimeException("Failed waiting for frame fence: %s".formatted(VkResult.decode(result)));
+        }
+    }
+
+    private void reportDeviceFault() {
+        try (MemoryStack stack = stackPush()) {
+            VkDeviceFaultCountsEXT counts = VkDeviceFaultCountsEXT.calloc(stack);
+            counts.sType$Default();
+            int result = vkGetDeviceFaultInfoEXT(device, counts, null);
+            if (result != VK_SUCCESS) {
+                Initializer.LOGGER.error("VK_ERROR_DEVICE_LOST: vkGetDeviceFaultInfoEXT(counts) returned {}", VkResult.decode(result));
+                return;
+            }
+
+            VkDeviceFaultInfoEXT info = VkDeviceFaultInfoEXT.calloc(stack);
+            info.sType$Default();
+            result = vkGetDeviceFaultInfoEXT(device, counts, info);
+            if (result == VK_SUCCESS) {
+                Initializer.LOGGER.error(
+                        "VK_ERROR_DEVICE_LOST device fault: description='{}', addressInfos={}, vendorInfos={}, vendorBinarySize={}",
+                        info.descriptionString(), counts.addressInfoCount(), counts.vendorInfoCount(), counts.vendorBinarySize());
+            } else {
+                Initializer.LOGGER.error("VK_ERROR_DEVICE_LOST: vkGetDeviceFaultInfoEXT(info) returned {}", VkResult.decode(result));
+            }
+        } catch (Throwable faultError) {
+            Initializer.LOGGER.error("Unable to query VK_EXT_device_fault after device loss", faultError);
+        }
+    }
+
+    private void resetFrameFence(int frame) {
+        // A frame fence may also have been used by an upload flush or by a
+        // recursive render entry. Waiting here makes every submission site
+        // safe even when those paths share the frame slot.
+        waitForFrameFence(frame);
+        int result = vkResetFences(device, inFlightFences.get(frame));
+        if (result != VK_SUCCESS) {
+            throw new RuntimeException("Failed resetting frame fence: %s".formatted(VkResult.decode(result)));
+        }
+    }
+
     private void resetDescriptors() {
         for (Pipeline pipeline : usedPipelines) {
             pipeline.resetDescriptorPool(currentFrame);
@@ -559,7 +658,7 @@ public class Renderer {
     }
 
     void waitForSwapChain() {
-        vkResetFences(device, inFlightFences.get(currentFrame));
+        resetFrameFence(currentFrame);
 
 //        constexpr VkPipelineStageFlags t=VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
         try (MemoryStack stack = MemoryStack.stackPush()) {
@@ -569,7 +668,10 @@ public class Renderer {
                                             .pWaitSemaphores(stack.longs(imageAvailableSemaphores.get(currentFrame)))
                                             .pWaitDstStageMask(stack.ints(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT));
 
-            vkQueueSubmit(DeviceManager.getGraphicsQueue().vkQueue(), info, inFlightFences.get(currentFrame));
+            int submitResult = vkQueueSubmit(DeviceManager.getGraphicsQueue().vkQueue(), info, inFlightFences.get(currentFrame));
+            if (submitResult != VK_SUCCESS) {
+                throw new RuntimeException("Failed to submit swapchain wait: %s".formatted(VkResult.decode(submitResult)));
+            }
             vkWaitForFences(device, inFlightFences.get(currentFrame), true, -1);
         }
     }
@@ -691,6 +793,19 @@ public class Renderer {
 
     public void setBoundRenderPass(RenderPass boundRenderPass) {
         this.boundRenderPass = boundRenderPass;
+    }
+
+    /**
+     * Clear the renderer-side pass bookkeeping after code which records an
+     * external Vulkan rendering scope directly (for example shader-pack MRT
+     * targets).  Those scopes do not have a VulkanMod RenderPass/Framebuffer
+     * object, so leaving either field populated makes a later vanilla
+     * endRenderPass() try to close an already-ended scope.
+     */
+    public void clearBoundRenderPassState() {
+        this.boundRenderPass = null;
+        this.boundFramebuffer = null;
+        VkGlFramebuffer.resetBoundFramebuffer();
     }
 
     public RenderPass getBoundRenderPass() {

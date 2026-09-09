@@ -245,7 +245,7 @@ public class PipelineConfig {
 
     public static int getVkSamplerDescriptorType(String s) {
         return switch (s) {
-            case "sampler2D" -> VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            case "sampler2D", "sampler2DShadow" -> VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
             case "image2D" -> VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
             default -> throw new IllegalStateException("Unexpected value: " + s);
         };

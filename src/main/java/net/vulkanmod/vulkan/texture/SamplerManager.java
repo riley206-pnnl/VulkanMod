@@ -36,6 +36,7 @@ public abstract class SamplerManager {
     static final float MIP_BIAS = -0.5f;
 
     static final Object2LongMap<SamplerInfo> SAMPLERS = new Object2LongOpenHashMap<>();
+    private static final it.unimi.dsi.fastutil.longs.LongSet COMPARISON_SAMPLERS = new it.unimi.dsi.fastutil.longs.LongOpenHashSet();
 
     public static long getSampler(boolean clamp, boolean linearFiltering, int maxLod) {
         return getSampler(clamp, linearFiltering, maxLod, false, 0);
@@ -47,6 +48,15 @@ public abstract class SamplerManager {
         int mipmapMode = linearFiltering ? VK_SAMPLER_MIPMAP_MODE_LINEAR : VK_SAMPLER_MIPMAP_MODE_NEAREST;
 
         return getSampler(addressMode, addressMode, filter, filter, mipmapMode, maxLod, anisotropy, maxAnisotropy, -1);
+    }
+
+    public static long getTerrainSampler(int maxLod, boolean anisotropy, int maxAnisotropy) {
+        int addressMode = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        int minFilter = anisotropy ? VK_FILTER_LINEAR : VK_FILTER_NEAREST;
+        int magFilter = VK_FILTER_NEAREST;
+        int mipmapMode = maxLod > 0 ? VK_SAMPLER_MIPMAP_MODE_LINEAR : VK_SAMPLER_MIPMAP_MODE_NEAREST;
+
+        return getSampler(addressMode, addressMode, minFilter, magFilter, mipmapMode, maxLod, anisotropy, maxAnisotropy, -1);
     }
 
     public static long getSampler(int addressModeU, int addressModeV,
@@ -99,7 +109,7 @@ public abstract class SamplerManager {
             samplerInfo.mipmapMode(sampler.getMipmapMode());
             samplerInfo.maxLod(sampler.getMaxLod());
             samplerInfo.minLod(0.0F);
-            samplerInfo.mipLodBias(0.0F);
+            samplerInfo.mipLodBias(sampler.getMaxLod() > 0 ? MIP_BIAS : 0.0F);
 
             // Reduction Mode
             if (sampler.hasReductionMode()) {
@@ -115,14 +125,23 @@ public abstract class SamplerManager {
                 throw new RuntimeException("Failed to create texture sampler");
             }
 
-            return pTextureSampler.get(0);
+            long handle = pTextureSampler.get(0);
+            if (sampler.compareEnabled()) {
+                COMPARISON_SAMPLERS.add(handle);
+            }
+            return handle;
         }
+    }
+
+    public static boolean isComparisonSampler(long sampler) {
+        return COMPARISON_SAMPLERS.contains(sampler);
     }
 
     public static void cleanUp() {
         for (long id : SAMPLERS.values()) {
             vkDestroySampler(DeviceManager.vkDevice, id, null);
         }
+        COMPARISON_SAMPLERS.clear();
     }
 
     static int getEncodedState(int addressModeU, int addressModeV,

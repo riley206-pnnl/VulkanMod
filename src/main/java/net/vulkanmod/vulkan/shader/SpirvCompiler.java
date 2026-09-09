@@ -139,7 +139,7 @@ public class SpirvCompiler {
 
             try {
                 for (String includePath : includePaths) {
-                    try (var stream = SpirvCompiler.class.getResourceAsStream(includePath + requested)) {
+                    try (var stream = net.vulkanmod.render.shader.ShaderLoadUtil.getInputStream(includePath + requested)) {
                         if (stream != null) {
                             return includeResult(requested, new String(stream.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8), user_data);
                         }

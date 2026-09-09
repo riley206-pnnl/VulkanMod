@@ -9,6 +9,8 @@ import net.minecraft.server.packs.resources.ResourceManager;
 import net.minecraft.world.phys.Vec3;
 import net.vulkanmod.render.profiling.Profiler;
 import net.vulkanmod.render.sky.CloudRenderer;
+import net.vulkanmod.render.shader.PipelineManager;
+import net.vulkanmod.Initializer;
 import org.jetbrains.annotations.Nullable;
 import org.joml.Matrix4fc;
 import org.spongepowered.asm.mixin.*;
@@ -66,6 +68,14 @@ public abstract class LevelRendererM {
     private void onReload(ResourceManager resourceManager, CallbackInfo ci) {
         if (this.vmCloudRenderer != null) {
             this.vmCloudRenderer.loadTexture();
+        }
+        // Resource reloads can replace shader-pack files and texture handles.
+        // Rebuild pack SPIR-V and descriptors instead of retaining pipelines
+        // that reference the pre-reload resources.
+        if (Boolean.getBoolean("vulkanmod.disablePackReload")) {
+            Initializer.LOGGER.warn("Shader-pack reload disabled by diagnostic property");
+        } else {
+            PipelineManager.reloadActivePack();
         }
     }
 

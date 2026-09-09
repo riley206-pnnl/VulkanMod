@@ -1,0 +1,27 @@
+modLoader = "javafml"
+loaderVersion = "[4,)"
+license = "All Rights Reserved"
+
+[[mods]]
+modId = "beryl"
+version = "0.2.1-alpha-local"
+displayName = "Beryl (local NeoForge adaptation)"
+authors = "Collateral"
+description = "Local NeoForge adaptation of Beryl's bundled Vulkan shaders."
+
+[[dependencies.beryl]]
+modId = "neoforge"
+type = "required"
+versionRange = "[26.1.2.100,)"
+ordering = "NONE"
+side = "CLIENT"
+
+[[dependencies.beryl]]
+modId = "vulkanmod"
+type = "required"
+versionRange = "[0.6.7,)"
+ordering = "AFTER"
+side = "CLIENT"
+
+[[mixins]]
+config = "beryl.mixins.json"

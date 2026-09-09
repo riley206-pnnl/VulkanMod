@@ -53,7 +53,7 @@ public abstract class VRenderSystem {
     public static MappedBuffer TextureMatrix = new MappedBuffer(16 * 4);
     public static MappedBuffer MVP = new MappedBuffer(16 * 4);
 
-    public static MappedBuffer modelOffset = new MappedBuffer(3 * 4);
+    public static MappedBuffer modelOffset = new MappedBuffer(4 * 4);
     public static MappedBuffer lightDirection0 = new MappedBuffer(3 * 4);
     public static MappedBuffer lightDirection1 = new MappedBuffer(3 * 4);
 

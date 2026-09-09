@@ -35,7 +35,10 @@ public class FluidRenderer {
         getFluidRenderer().tesselate(region, blockPos, layer -> {
             TerrainRenderType renderType = TerrainRenderType.get(layer);
             renderType = TerrainRenderType.getRemapped(renderType);
-            return this.resources.builderPack.builder(renderType).getBufferBuilder(QuadFacing.UNDEFINED.ordinal());
+            var builder = this.resources.builderPack.builder(renderType);
+            builder.setBlockAttributes(blockState);
+            builder.setFluidBlockAttributes(fluidState);
+            return builder.getBufferBuilder(QuadFacing.UNDEFINED.ordinal());
         }, blockState, fluidState);
     }
 }

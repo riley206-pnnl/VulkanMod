@@ -160,6 +160,17 @@ public abstract class DeviceManager {
 
             net.vulkanmod.vulkan.queue.Queue.QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
 
+            if (!device.availableDynamicRendering.dynamicRendering()) {
+                throw new IllegalStateException("Selected device does not expose VK_KHR_dynamic_rendering");
+            }
+            if (!device.availableSynchronization2.synchronization2()) {
+                throw new IllegalStateException("Selected device does not expose VK_KHR_synchronization2");
+            }
+            Initializer.LOGGER.info("Vulkan features: dynamicRendering={}, synchronization2={}, shaderDrawParameters={}",
+                    device.availableDynamicRendering.dynamicRendering(),
+                    device.availableSynchronization2.synchronization2(),
+                    device.isDrawIndirectSupported());
+
             int[] uniqueQueueFamilies = indices.unique();
 
             VkDeviceQueueCreateInfo.Buffer queueCreateInfos = VkDeviceQueueCreateInfo.calloc(uniqueQueueFamilies.length, stack);
@@ -178,6 +189,20 @@ public abstract class DeviceManager {
             VkPhysicalDeviceVulkan12Features deviceVulkan12Features = VkPhysicalDeviceVulkan12Features.calloc(stack);
             deviceVulkan12Features.sType$Default();
             deviceVulkan12Features.hostQueryReset(true);
+
+            // Use the KHR feature structs because this renderer requests
+            // Vulkan 1.2. Keep the feature chain explicit; assigning
+            // VkDeviceCreateInfo.pNext repeatedly does not append structures.
+            VkPhysicalDeviceDynamicRenderingFeaturesKHR dynamicRenderingFeatures =
+                    VkPhysicalDeviceDynamicRenderingFeaturesKHR.calloc(stack);
+            dynamicRenderingFeatures.sType$Default();
+            dynamicRenderingFeatures.dynamicRendering(true);
+
+            VkPhysicalDeviceSynchronization2FeaturesKHR synchronization2Features =
+                    VkPhysicalDeviceSynchronization2FeaturesKHR.calloc(stack);
+            synchronization2Features.sType$Default();
+            synchronization2Features.synchronization2(true);
+
 
             VkPhysicalDeviceFeatures2 deviceFeatures = VkPhysicalDeviceFeatures2.calloc(stack);
             deviceFeatures.sType$Default();
@@ -201,18 +226,21 @@ public abstract class DeviceManager {
             createInfo.sType(VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO);
             createInfo.pQueueCreateInfos(queueCreateInfos);
             createInfo.pEnabledFeatures(deviceFeatures.features());
-            createInfo.pNext(deviceVulkan11Features);
-            createInfo.pNext(deviceVulkan12Features);
-
-            if (Vulkan.DYNAMIC_RENDERING) {
-                VkPhysicalDeviceDynamicRenderingFeaturesKHR dynamicRenderingFeaturesKHR = VkPhysicalDeviceDynamicRenderingFeaturesKHR.calloc(stack);
-                dynamicRenderingFeaturesKHR.sType$Default();
-                dynamicRenderingFeaturesKHR.dynamicRendering(true);
-
-                deviceVulkan11Features.pNext(dynamicRenderingFeaturesKHR.address());
-            }
+            deviceVulkan11Features.pNext(deviceVulkan12Features.address());
+            deviceVulkan12Features.pNext(dynamicRenderingFeatures.address());
+            dynamicRenderingFeatures.pNext(synchronization2Features.address());
+            // Pass the raw head address explicitly. This avoids any generated
+            // LWJGL overload ambiguity and preserves the complete 1.1 ->
+            // 1.2 -> 1.3 feature chain at vkCreateDevice time.
+            createInfo.pNext(deviceVulkan11Features.address());
 
             HashSet<String> enabledExtensions = new HashSet<>(Vulkan.REQUIRED_DEVICE_EXTENSIONS);
+
+            if (Boolean.getBoolean("vulkanmod.deviceFault")
+                    && device.hasExtension(EXTDeviceFault.VK_EXT_DEVICE_FAULT_EXTENSION_NAME)) {
+                enabledExtensions.add(EXTDeviceFault.VK_EXT_DEVICE_FAULT_EXTENSION_NAME);
+                Initializer.LOGGER.info("VK_EXT_device_fault enabled for device-loss diagnostics");
+            }
 
             if (device.hasExtension("VK_KHR_portability_subset")) {
                 enabledExtensions.add("VK_KHR_portability_subset");

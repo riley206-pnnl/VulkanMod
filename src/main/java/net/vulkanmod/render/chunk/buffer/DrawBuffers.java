@@ -11,6 +11,7 @@ import net.vulkanmod.render.chunk.cull.QuadFacing;
 import net.vulkanmod.render.chunk.util.StaticQueue;
 import net.vulkanmod.render.vertex.CustomVertexFormat;
 import net.vulkanmod.render.vertex.TerrainRenderType;
+import net.vulkanmod.shaders.PackDebug;
 import net.vulkanmod.vulkan.Renderer;
 import net.vulkanmod.vulkan.memory.MemoryTypes;
 import net.vulkanmod.vulkan.memory.buffer.IndirectBuffer;
@@ -34,13 +35,13 @@ public class DrawBuffers {
     public static final float POS_OFFSET = CustomVertexFormat.getPositionOffset();
 
     private static final int CMD_STRIDE = 32;
+    private static long lastShadowDrawDiagnostic = -1L;
 
     private static final long cmdBufferPtr = MemoryUtil.nmemAlignedAlloc(CMD_STRIDE, (long) ChunkAreaManager.AREA_SIZE * QuadFacing.COUNT * CMD_STRIDE);
 
     private final int index;
     public final int vertexSize = PipelineManager.getTerrainVertexFormat().getVertexSize();
-    private final float positionOffset = PipelineManager.getTerrainVertexFormat() == CustomVertexFormat.COMPRESSED_TERRAIN
-            ? POS_OFFSET : 0.0f;
+    private final float positionOffset = CustomVertexFormat.getPositionOffset();
     private final Vector3i origin;
     private final int minHeight;
 
@@ -206,14 +207,24 @@ public class DrawBuffers {
         return this.vertexBuffers.get(r);
     }
 
+    /** Synchronize the GPU push-constant origin with the recycled area slot. */
+    public void setOrigin(int x, int y, int z) {
+        this.origin.set(x, y, z);
+    }
+
     private boolean hasRenderType(TerrainRenderType r) {
         return this.vertexBuffers.containsKey(r);
     }
 
     private int encodeSectionOffset(int xOffset, int yOffset, int zOffset) {
-        final int xOffset1 = (xOffset & 127);
-        final int zOffset1 = (zOffset & 127);
-        final int yOffset1 = (yOffset - this.minHeight & 127);
+        // vm_ModelOffset already contains this area's world origin minus the
+        // camera.  The per-instance section value must therefore be relative
+        // to that origin; encoding absolute coordinates applies the world
+        // position twice and produces the fragmented terrain seen in the
+        // pack G-buffer and shadow map.
+        final int xOffset1 = ((xOffset - this.origin.x) & 127);
+        final int zOffset1 = ((zOffset - this.origin.z) & 127);
+        final int yOffset1 = ((yOffset - this.origin.y) & 127);
         return yOffset1 << 16 | zOffset1 << 8 | xOffset1;
     }
 
@@ -222,20 +233,34 @@ public class DrawBuffers {
         float yOffset = (float) ((this.origin.y) + positionOffset - camY);
         float zOffset = (float) ((this.origin.z) + positionOffset - camZ);
 
-        ByteBuffer byteBuffer = stack.malloc(12);
-
+        // Native/Beryl terrain declares vec3; the experimental pack path uses
+        // vec4. Upload only the range declared by the selected pipeline.
+        var constants = pipeline.getPushConstants();
+        if (constants == null || constants.getSize() < 12) {
+            throw new IllegalStateException("Terrain pipeline is missing its model-offset push constants");
+        }
+        ByteBuffer byteBuffer = stack.calloc(constants.getSize());
         byteBuffer.putFloat(0, xOffset);
         byteBuffer.putFloat(4, yOffset);
         byteBuffer.putFloat(8, zOffset);
-
-        vkCmdPushConstants(commandBuffer, pipeline.getLayout(), VK_SHADER_STAGE_VERTEX_BIT, 0, byteBuffer);
+        vkCmdPushConstants(commandBuffer, pipeline.getLayout(), constants.stages, 0, byteBuffer);
     }
 
     public void buildDrawBatchesIndirect(Vector3d cameraPos, IndirectBuffer indirectBuffer, StaticQueue<RenderSection> queue, TerrainRenderType terrainRenderType) {
+        buildDrawBatchesIndirect(cameraPos, indirectBuffer, queue, terrainRenderType, false);
+    }
+
+    /** Build batches for a light camera. Shadow maps must not inherit the
+     * player's face-culling mask, because faces hidden from the player can
+     * still cast into the light camera. */
+    public void buildDrawBatchesIndirect(Vector3d cameraPos, IndirectBuffer indirectBuffer,
+                                         StaticQueue<RenderSection> queue,
+                                         TerrainRenderType terrainRenderType,
+                                         boolean noCameraCulling) {
         long bufferPtr = cmdBufferPtr;
 
         boolean isTranslucent = terrainRenderType == TerrainRenderType.TRANSLUCENT;
-        boolean backFaceCulling = Initializer.CONFIG.backFaceCulling && !isTranslucent;
+        boolean backFaceCulling = !noCameraCulling && Initializer.CONFIG.backFaceCulling && !isTranslucent;
 
         int drawCount = 0;
 
@@ -372,10 +397,99 @@ public class DrawBuffers {
     }
 
     public void buildDrawBatchesDirect(Vector3d cameraPos, StaticQueue<RenderSection> queue, TerrainRenderType terrainRenderType) {
+        buildDrawBatchesDirect(cameraPos, queue, terrainRenderType, false);
+    }
+
+    public void buildDrawBatchesDirect(Vector3d cameraPos, StaticQueue<RenderSection> queue,
+                                       TerrainRenderType terrainRenderType,
+                                       boolean noCameraCulling) {
+        buildDrawBatchesDirect(cameraPos, queue, terrainRenderType, noCameraCulling, false);
+    }
+
+    /**
+     * Pack G-buffer draws use gl_InstanceIndex to select the section offset.
+     * The normal direct path coalesces adjacent sections into one indexed draw
+     * and therefore reuses the first section's baseInstance for all vertices.
+     * Keep one draw per section/facing when the shader consumes section data.
+     */
+    public void buildDrawBatchesDirectPack(Vector3d cameraPos, StaticQueue<RenderSection> queue,
+                                           TerrainRenderType terrainRenderType,
+                                           boolean noCameraCulling) {
+        buildDrawBatchesDirect(cameraPos, queue, terrainRenderType, noCameraCulling, true);
+    }
+
+    /** Log the exact first-instance/section contract consumed by a pack
+     * shadow draw. This is intentionally opt-in because it runs on the
+     * render thread and is only useful while diagnosing caster placement. */
+    public boolean debugPackShadowDraw(RenderSection section, TerrainRenderType terrainRenderType) {
+        if (!Boolean.getBoolean("vulkanmod.debugShadowDraws")) return false;
+        long frame = PackDebug.frameNumber();
+        if (lastShadowDrawDiagnostic == frame) return true;
+        lastShadowDrawDiagnostic = frame;
+
+        long params = 0L;
+        for (int facing = 0; facing < DrawParametersBuffer.FACINGS; facing++) {
+            long candidate = DrawParametersBuffer.getParamsPtr(this.drawParamsPtr,
+                    section.inAreaIndex, terrainRenderType.ordinal(), facing);
+            if (DrawParametersBuffer.getIndexCount(candidate) > 0) {
+                params = candidate;
+                break;
+            }
+        }
+        if (params == 0L) return false;
+        int encoded = MemoryUtil.memGetInt(sectionDataBuffer.getPointer() + (long) section.inAreaIndex * 4L);
+        int decodedX = encoded & 0xFF;
+        int decodedZ = (encoded >>> 8) & 0xFF;
+        int decodedY = (encoded >>> 16) & 0xFF;
+        Initializer.LOGGER.info("VulkanMod SHADOW_DRAW: section=({}, {}, {}) area=({}, {}, {}) "
+                        + "encoded=0x{} decoded=({}, {}, {}) baseInstance={} vertexOffset={} firstIndex={} indexCount={} stride={}",
+                section.xOffset, section.yOffset, section.zOffset,
+                this.origin.x, this.origin.y, this.origin.z,
+                Integer.toHexString(encoded), decodedX, decodedY, decodedZ,
+                DrawParametersBuffer.getBaseInstance(params),
+                DrawParametersBuffer.getVertexOffset(params),
+                DrawParametersBuffer.getFirstIndex(params),
+                DrawParametersBuffer.getIndexCount(params), this.vertexSize);
+        return true;
+    }
+
+    private void buildDrawBatchesDirect(Vector3d cameraPos, StaticQueue<RenderSection> queue,
+                                        TerrainRenderType terrainRenderType,
+                                        boolean noCameraCulling, boolean perSection) {
         boolean isTranslucent = terrainRenderType == TerrainRenderType.TRANSLUCENT;
-        boolean backFaceCulling = Initializer.CONFIG.backFaceCulling && !isTranslucent;
+        boolean backFaceCulling = !noCameraCulling && Initializer.CONFIG.backFaceCulling && !isTranslucent;
 
         VkCommandBuffer commandBuffer = Renderer.getCommandBuffer();
+
+        if (perSection) {
+            long paramsBase = this.drawParamsPtr
+                    + (long) terrainRenderType.ordinal() * DrawParametersBuffer.SECTIONS
+                    * DrawParametersBuffer.FACINGS * DrawParametersBuffer.STRIDE;
+            long facingsStride = (long) DrawParametersBuffer.FACINGS * DrawParametersBuffer.STRIDE;
+            for (var iterator = queue.iterator(isTranslucent); iterator.hasNext(); ) {
+                RenderSection section = iterator.next();
+                // Solid/cutout builders store quads in their six directional
+                // facing buffers when back-face culling is enabled. A light
+                // pass disables camera culling, but must still submit those
+                // directional buffers; selecting only UNDEFINED here skips
+                // almost all terrain casters and leaves an empty shadow map.
+                int mask = noCameraCulling
+                        ? ((1 << QuadFacing.COUNT) - 1)
+                        : (backFaceCulling ? getMask(cameraPos, section) : (1 << UNDEFINED_FACING_IDX));
+                long sectionBase = paramsBase + (long) section.inAreaIndex * facingsStride;
+                for (int facing = 0; facing < DrawParametersBuffer.FACINGS; facing++) {
+                    if ((mask & (1 << facing)) == 0) continue;
+                    long params = sectionBase + (long) facing * DrawParametersBuffer.STRIDE;
+                    int indexCount = DrawParametersBuffer.getIndexCount(params);
+                    if (indexCount <= 0) continue;
+                    vkCmdDrawIndexed(commandBuffer, indexCount, 1,
+                            DrawParametersBuffer.getFirstIndex(params),
+                            DrawParametersBuffer.getVertexOffset(params),
+                            DrawParametersBuffer.getBaseInstance(params));
+                }
+            }
+            return;
+        }
 
         long drawParamsBasePtr = this.drawParamsPtr + (terrainRenderType.ordinal() * DrawParametersBuffer.SECTIONS * DrawParametersBuffer.FACINGS) * DrawParametersBuffer.STRIDE;
         final long facingsStride = DrawParametersBuffer.FACINGS * DrawParametersBuffer.STRIDE;

@@ -34,9 +34,14 @@ public class UploadManager {
         if (this.commandBuffer == null)
             return;
 
-        this.queue.submitCommands(this.commandBuffer);
+        // Buffer uploads run on the transfer queue.  A fence only gives the
+        // CPU completion information; it does not create a queue-to-queue
+        // execution/memory dependency for the graphics submission that reads
+        // these buffers.  Signal the command-buffer semaphore and let the
+        // frame submit wait on it.
+        this.queue.submitCommands(this.commandBuffer, true);
 
-        Synchronization.INSTANCE.addCommandBuffer(this.commandBuffer);
+        Synchronization.INSTANCE.addCommandBuffer(this.commandBuffer, true);
 
         this.commandBuffer = null;
         this.dstBuffers.clear();
@@ -87,6 +92,8 @@ public class UploadManager {
             VkBufferMemoryBarrier bufferMemoryBarrier = bufferMemoryBarriers.get(0);
             bufferMemoryBarrier.sType$Default();
             bufferMemoryBarrier.buffer(src.getId());
+            bufferMemoryBarrier.srcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED);
+            bufferMemoryBarrier.dstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED);
             bufferMemoryBarrier.srcAccessMask(VK_ACCESS_TRANSFER_WRITE_BIT);
             bufferMemoryBarrier.dstAccessMask(VK_ACCESS_TRANSFER_READ_BIT);
             bufferMemoryBarrier.size(VK_WHOLE_SIZE);

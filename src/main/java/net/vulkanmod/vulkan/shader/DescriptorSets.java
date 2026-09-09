@@ -109,7 +109,7 @@ public class DescriptorSets {
             }
 
             long view = imageDescriptor.getImageView(image);
-            long sampler = image.getSampler();
+            long sampler = image.getSampler(imageDescriptor.isComparisonSampler());
 
             if (imageDescriptor.isReadOnlyLayout)
                 image.readOnlyLayout();
@@ -196,7 +196,7 @@ public class DescriptorSets {
             }
 
             long view = imageDescriptor.getImageView(image);
-            long sampler = image.getSampler();
+            long sampler = image.getSampler(imageDescriptor.isComparisonSampler());
             int layout = imageDescriptor.getLayout();
 
             if (imageDescriptor.isReadOnlyLayout)

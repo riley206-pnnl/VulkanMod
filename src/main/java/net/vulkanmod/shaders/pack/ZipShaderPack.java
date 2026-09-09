@@ -46,6 +46,13 @@ public class ZipShaderPack implements ShaderPack {
     }
 
     @Override
+    public java.io.InputStream openStream(String path) throws IOException {
+        ZipEntry entry = zip.getEntry(normalize(path));
+        if (entry == null || entry.isDirectory()) return null;
+        return zip.getInputStream(entry);
+    }
+
+    @Override
     public List<String> listFiles(String dir) {
         String prefix = normalize(dir);
         List<String> result = new ArrayList<>();

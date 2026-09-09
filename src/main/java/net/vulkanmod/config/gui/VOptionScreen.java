@@ -63,6 +63,13 @@ public class VOptionScreen extends Screen {
         this.modSettingsEntries = new ArrayList<>(ModSettingsRegistry.INSTANCE.getModEntries());
     }
 
+    public VOptionScreen(Component title, Screen parent, ModSettingsEntry entry) {
+        super(title);
+        this.parent = parent;
+        this.optionPages = new ArrayList<>();
+        this.modSettingsEntries = new ArrayList<>(List.of(entry));
+    }
+
     @Override
     protected void init() {
         this.initOptionsPages();

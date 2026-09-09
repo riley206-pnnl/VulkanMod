@@ -113,6 +113,19 @@ public class MemoryManager {
             bufferInfo.size(size);
             bufferInfo.usage(usage);
 
+            // VulkanMod records uploads on a dedicated transfer queue and
+            // consumes the same buffers on the graphics queue.  Without an
+            // ownership transfer or concurrent sharing, the default
+            // EXCLUSIVE mode makes those accesses invalid and can surface as
+            // a delayed device loss.  Use the queue-family set for all
+            // renderer buffers; this is the safe baseline until explicit
+            // ownership transfers are introduced.
+            int[] queueFamilies = Queue.getQueueFamilies().unique();
+            if (queueFamilies.length > 1) {
+                bufferInfo.sharingMode(VK_SHARING_MODE_CONCURRENT);
+                bufferInfo.pQueueFamilyIndices(stack.ints(queueFamilies));
+            }
+
             VmaAllocationCreateInfo allocationInfo = VmaAllocationCreateInfo.calloc(stack);
             allocationInfo.requiredFlags(properties);
 
@@ -169,9 +182,11 @@ public class MemoryManager {
             imageInfo.usage(usage);
             imageInfo.samples(VK_SAMPLE_COUNT_1_BIT);
             imageInfo.flags(flags);
-//            imageInfo.sharingMode(VK_SHARING_MODE_CONCURRENT);
-            imageInfo.pQueueFamilyIndices(
-                    stack.ints(Queue.getQueueFamilies().graphicsFamily, Queue.getQueueFamilies().computeFamily));
+            int[] queueFamilies = Queue.getQueueFamilies().unique();
+            if (queueFamilies.length > 1) {
+                imageInfo.sharingMode(VK_SHARING_MODE_CONCURRENT);
+                imageInfo.pQueueFamilyIndices(stack.ints(queueFamilies));
+            }
 
             VmaAllocationCreateInfo allocationInfo = VmaAllocationCreateInfo.calloc(stack);
             allocationInfo.requiredFlags(memProperties);

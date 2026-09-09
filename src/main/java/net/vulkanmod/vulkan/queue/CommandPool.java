@@ -2,6 +2,7 @@ package net.vulkanmod.vulkan.queue;
 
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import net.vulkanmod.vulkan.Vulkan;
+import net.vulkanmod.vulkan.util.VkResult;
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.*;
@@ -155,7 +156,10 @@ public class CommandPool {
         public long submitCommands(MemoryStack stack, VkQueue queue, boolean useSemaphore) {
             long fence = this.fence;
 
-            vkEndCommandBuffer(this.handle);
+            int result = vkEndCommandBuffer(this.handle);
+            if (result != VK_SUCCESS) {
+                throw new IllegalStateException("Failed to end upload command buffer: " + VkResult.decode(result));
+            }
 
             vkResetFences(Vulkan.getVkDevice(), this.fence);
 
@@ -167,7 +171,10 @@ public class CommandPool {
                 submitInfo.pSignalSemaphores(stack.longs(this.semaphore));
             }
 
-            vkQueueSubmit(queue, submitInfo, fence);
+            result = vkQueueSubmit(queue, submitInfo, fence);
+            if (result != VK_SUCCESS) {
+                throw new IllegalStateException("Failed to submit upload command buffer: " + VkResult.decode(result));
+            }
 
             this.recording = false;
             this.submitted = true;

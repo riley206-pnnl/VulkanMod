@@ -31,3 +31,9 @@ bin/
 # fabric
 
 run/
+
+# logs and dumps
+logs/
+*.log
+*.log.gz
+VP_*.json

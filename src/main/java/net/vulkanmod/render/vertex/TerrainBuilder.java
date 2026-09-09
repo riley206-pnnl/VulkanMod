@@ -2,6 +2,8 @@ package net.vulkanmod.render.vertex;
 
 import com.mojang.blaze3d.vertex.VertexFormat;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.material.FluidState;
+import net.minecraft.tags.FluidTags;
 import net.vulkanmod.Initializer;
 import net.vulkanmod.render.shader.PipelineManager;
 import net.vulkanmod.render.chunk.cull.QuadFacing;
@@ -30,6 +32,9 @@ public class TerrainBuilder {
     protected VertexBuilder vertexBuilder;
 
     private final TerrainBufferBuilder[] bufferBuilders;
+    private int packEntity;
+    private float packMidU;
+    private float packMidV;
 
     public TerrainBuilder(int size, VertexBuilder vertexBuilder) {
         // FIXME: same size is used for both index and vertex buffers
@@ -48,6 +53,7 @@ public class TerrainBuilder {
     }
 
     public TerrainBufferBuilder getBufferBuilder(int i) {
+        this.bufferBuilders[i].setPackMaterial(this.packEntity, this.packMidU, this.packMidV);
         return this.bufferBuilders[i];
     }
 
@@ -177,6 +183,43 @@ public class TerrainBuilder {
     }
 
     public void setBlockAttributes(BlockState blockState) {
+        this.packEntity = materialId(blockState);
+        this.packMidU = 0.0f;
+        this.packMidV = 0.0f;
+    }
+
+    public void setFluidBlockAttributes(FluidState fluidState) {
+        if (fluidState != null && !fluidState.isEmpty()) {
+            if (fluidState.is(FluidTags.WATER)) this.packEntity = 32000;
+            else if (fluidState.is(FluidTags.LAVA)) this.packEntity = 32032;
+        }
+    }
+
+    /**
+     * Complementary uses the OptiFine/Iris mc_Entity channel as a material
+     * ABI, not as a generic block id.  Supplying zero for every translucent
+     * quad makes water, glass, leaves and vines all take the wrong lighting
+     * path (and also prevents their correct shadow policy).  Keep this table
+     * deliberately based on stable block description ids so modded blocks do
+     * not require hard dependencies on their classes.
+     */
+    private static int materialId(BlockState state) {
+        if (state == null) return 0;
+        if (state.getFluidState().is(FluidTags.WATER)) return 32000;
+        if (state.getFluidState().is(FluidTags.LAVA)) return 32032;
+
+        String id = state.getBlock().getDescriptionId().toLowerCase(java.util.Locale.ROOT);
+        if (id.contains("glass_pane") || id.contains("iron_bars") || id.contains("pane")) return 32012;
+        if (id.contains("glass")) return 32008;
+        if (id.contains("ice")) return 32004;
+        if (id.contains("vine")) return 10013;
+        if (id.contains("leaves") || id.contains("leaf")) return 10009;
+        if (id.contains("grass") || id.contains("fern") || id.contains("flower")
+                || id.contains("bush") || id.contains("sapling") || id.contains("crop")
+                || id.contains("kelp") || id.contains("seagrass") || id.contains("fungus")) {
+            return 10005;
+        }
+        return 0;
     }
 
     public record DrawState(int vertexSize, int indexCount, VertexFormat.IndexType indexType,

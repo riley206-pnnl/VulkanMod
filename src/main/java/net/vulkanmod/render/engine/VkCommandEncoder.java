@@ -321,6 +321,8 @@ public class VkCommandEncoder implements CommandEncoderBackend {
                         VkBufferMemoryBarrier bufferMemoryBarrier = bufferMemoryBarriers.get(0);
                         bufferMemoryBarrier.sType$Default();
                         bufferMemoryBarrier.buffer(vkGpuBuffer.buffer.getId());
+                        bufferMemoryBarrier.srcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED);
+                        bufferMemoryBarrier.dstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED);
                         bufferMemoryBarrier.srcAccessMask(VK_ACCESS_TRANSFER_WRITE_BIT);
                         bufferMemoryBarrier.dstAccessMask(VK_ACCESS_TRANSFER_WRITE_BIT);
                         bufferMemoryBarrier.size(VK_WHOLE_SIZE);
@@ -836,6 +838,13 @@ public class VkCommandEncoder implements CommandEncoderBackend {
         RenderPipeline renderPipeline = renderPass.pipeline;
         EGlProgram glProgram = ExtendedRenderPipeline.of(renderPass.pipeline).getProgram();
         Pipeline pipeline = ExtendedRenderPipeline.of(renderPass.pipeline).getPipeline();
+
+        // Shader-pack pipelines own their global UBOs and texture descriptors;
+        // they are attached to a vanilla RenderPipeline only as a draw-hook.
+        // There is no vanilla EGlProgram name map for those descriptors.
+        if (glProgram == null) {
+            return;
+        }
 
         for (UBO ubo : pipeline.getBuffers()) {
             String uniformName = ubo.name;

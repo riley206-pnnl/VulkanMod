@@ -21,7 +21,7 @@ public class ThreadBuilderPack {
                                         .bufferSize() / DefaultVertexFormat.BLOCK.getVertexSize();
 
             boolean compressedFormat = PipelineManager.terrainVertexFormat == CustomVertexFormat.COMPRESSED_TERRAIN;
-            VertexBuilder vertexBuilder = compressedFormat ? new VertexBuilder.CompressedVertexBuilder() : new VertexBuilder.DefaultVertexBuilder();
+            VertexBuilder vertexBuilder = compressedFormat ? new VertexBuilder.CompressedVertexBuilder() : new VertexBuilder.PackVertexBuilder();
             return new TerrainBuilder(size, vertexBuilder);
         };
     }

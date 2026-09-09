@@ -37,6 +37,13 @@ public class FolderShaderPack implements ShaderPack {
     }
 
     @Override
+    public java.io.InputStream openStream(String path) throws IOException {
+        Path file = root.resolve(path);
+        if (!Files.isRegularFile(file)) return null;
+        return Files.newInputStream(file);
+    }
+
+    @Override
     public List<String> listFiles(String dir) {
         List<String> result = new ArrayList<>();
         Path base = root.resolve(dir);

@@ -203,6 +203,12 @@ public class ChunkAreaManager {
         }
     }
 
+    public void resetShadowQueues() {
+        for (ChunkArea chunkArea : this.chunkAreasArr) {
+            chunkArea.resetShadowQueue();
+        }
+    }
+
     private int getAreaIndex(int x, int y, int z) {
         return (z * this.ySize + y) * this.xzSize + x;
     }
